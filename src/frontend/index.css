@@ -1,0 +1,191 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("/assets/fonts/BricolageGrotesque.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Outfit";
+  src: url("/assets/fonts/Outfit.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.25rem;
+
+    /* Horror dark theme - near-black with green tint */
+    --background: 0.08 0.015 145;
+    --foreground: 0.88 0.08 140;
+    --card: 0.1 0.018 145;
+    --card-foreground: 0.88 0.08 140;
+    --popover: 0.1 0.018 145;
+    --popover-foreground: 0.88 0.08 140;
+    --primary: 0.65 0.18 140;
+    --primary-foreground: 0.06 0.01 145;
+    --secondary: 0.15 0.025 145;
+    --secondary-foreground: 0.88 0.08 140;
+    --muted: 0.12 0.02 145;
+    --muted-foreground: 0.5 0.06 140;
+    --accent: 0.72 0.2 140;
+    --accent-foreground: 0.06 0.01 145;
+    --destructive: 0.55 0.22 25;
+    --destructive-foreground: 0.98 0 0;
+    --border: 0.18 0.03 145;
+    --input: 0.15 0.025 145;
+    --ring: 0.65 0.18 140;
+
+    /* Game specific tokens */
+    --horror-green: 0.65 0.18 140;
+    --horror-red: 0.55 0.22 25;
+    --horror-dim: 0.08 0.015 145;
+    --horror-glow: 0.72 0.2 140;
+    --horror-dark: 0.05 0.01 145;
+
+    --chart-1: 0.65 0.18 140;
+    --chart-2: 0.55 0.22 25;
+    --chart-3: 0.4 0.1 145;
+    --chart-4: 0.75 0.15 85;
+    --chart-5: 0.5 0.18 30;
+    --sidebar: 0.08 0.015 145;
+    --sidebar-foreground: 0.88 0.08 140;
+    --sidebar-primary: 0.65 0.18 140;
+    --sidebar-primary-foreground: 0.06 0.01 145;
+    --sidebar-accent: 0.12 0.02 145;
+    --sidebar-accent-foreground: 0.88 0.08 140;
+    --sidebar-border: 0.18 0.03 145;
+    --sidebar-ring: 0.65 0.18 140;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Outfit", sans-serif;
+    overflow: hidden;
+  }
+}
+
+/* CRT scanline effect */
+@keyframes scanlines {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 4px; }
+}
+
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  92% { opacity: 1; }
+  93% { opacity: 0.85; }
+  94% { opacity: 1; }
+  96% { opacity: 0.9; }
+  97% { opacity: 1; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  10% { transform: translate(-8px, -4px) rotate(-1deg); }
+  20% { transform: translate(8px, 4px) rotate(1deg); }
+  30% { transform: translate(-8px, 4px) rotate(0deg); }
+  40% { transform: translate(8px, -4px) rotate(1deg); }
+  50% { transform: translate(-4px, 8px) rotate(-1deg); }
+  60% { transform: translate(4px, -8px) rotate(0deg); }
+  70% { transform: translate(-8px, -4px) rotate(-1deg); }
+  80% { transform: translate(8px, 4px) rotate(1deg); }
+  90% { transform: translate(-4px, 4px) rotate(0deg); }
+}
+
+@keyframes redFlash {
+  0% { opacity: 0; }
+  10% { opacity: 0.9; }
+  30% { opacity: 0.7; }
+  50% { opacity: 0.95; }
+  70% { opacity: 0.6; }
+  100% { opacity: 0; }
+}
+
+@keyframes glitch {
+  0%, 100% { clip-path: inset(0 0 100% 0); transform: translate(0); }
+  5% { clip-path: inset(20% 0 60% 0); transform: translate(-4px, 2px); }
+  10% { clip-path: inset(50% 0 30% 0); transform: translate(4px, -2px); }
+  15% { clip-path: inset(10% 0 80% 0); transform: translate(-2px, 4px); }
+  20% { clip-path: inset(70% 0 10% 0); transform: translate(2px, -4px); }
+  25% { clip-path: inset(0 0 100% 0); transform: translate(0); }
+}
+
+@keyframes staticNoise {
+  0% { opacity: 0.03; }
+  25% { opacity: 0.06; }
+  50% { opacity: 0.04; }
+  75% { opacity: 0.07; }
+  100% { opacity: 0.03; }
+}
+
+@keyframes powerPulse {
+  0%, 100% { box-shadow: 0 0 8px oklch(var(--horror-red)); }
+  50% { box-shadow: 0 0 20px oklch(var(--horror-red)), 0 0 40px oklch(var(--horror-red) / 0.5); }
+}
+
+@keyframes textGlitch {
+  0%, 90%, 100% { text-shadow: 0 0 20px oklch(var(--horror-green)), 0 0 40px oklch(var(--horror-green) / 0.5); }
+  91% { text-shadow: -4px 0 oklch(var(--horror-red)), 4px 0 oklch(0.65 0.18 140); }
+  93% { text-shadow: 4px 0 oklch(var(--horror-red)), -4px 0 oklch(0.65 0.18 140); }
+  95% { text-shadow: 0 0 20px oklch(var(--horror-green)), 0 0 40px oklch(var(--horror-green) / 0.5); }
+}
+
+.game-container {
+  animation: flicker 8s infinite;
+}
+
+.screen-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+.red-flash {
+  animation: redFlash 0.8s ease-out;
+}
+
+.title-glitch {
+  animation: textGlitch 4s infinite;
+}
+
+.crt-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    oklch(0 0 0 / 0.08) 2px,
+    oklch(0 0 0 / 0.08) 4px
+  );
+  z-index: 100;
+}
+
+.static-noise {
+  animation: staticNoise 0.1s infinite;
+}
+
+.power-critical {
+  animation: powerPulse 0.5s infinite;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: oklch(0.08 0.015 145);
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.4 0.1 140);
+}
