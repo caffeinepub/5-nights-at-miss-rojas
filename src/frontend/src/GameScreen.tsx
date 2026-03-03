@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { AnimatronicId, GameState } from "./hooks/useGameEngine";
+import PowerMinigame from "./components/PowerMinigame";
+import type {
+  AnimatronicId,
+  AnimatronicState,
+  GameState,
+} from "./hooks/useGameEngine";
 
 const ROOM_NAMES: Record<string, string> = {
   Cam1: "CLASSROOM",
@@ -8,22 +13,37 @@ const ROOM_NAMES: Record<string, string> = {
   Cam4: "EAST HALL",
   Cam5: "CAFETERIA HALL",
   Cam6: "CAFETERIA",
+  LEFT_CAM: "LEFT DOOR CAM",
+  RIGHT_CAM: "RIGHT DOOR CAM",
   LEFT_DOOR: "LEFT DOOR",
   RIGHT_DOOR: "RIGHT DOOR",
 };
 
 const ANIMATRONIC_COLORS: Record<AnimatronicId, string> = {
   missRojas: "#ff4444",
-  mrBooks: "#44ffaa",
-  carl: "#ffaa44",
-  lunchLady: "#ff44ff",
+  mrsPineda: "#44ffaa",
+  coachStutz: "#ffaa44",
+  mrMoody: "#88aaff",
+  coachWolferd: "#ffdd00",
 };
 
 const ANIMATRONIC_INITIALS: Record<AnimatronicId, string> = {
   missRojas: "MR",
-  mrBooks: "MB",
-  carl: "CJ",
-  lunchLady: "LL",
+  mrsPineda: "MP",
+  coachStutz: "CS",
+  mrMoody: "MM",
+  coachWolferd: "CW",
+};
+
+const ANIMATRONIC_IMAGES: Record<AnimatronicId, string> = {
+  missRojas: "/assets/generated/mrs-rojas-animatronic-final.dim_400x700.png",
+  mrsPineda:
+    "/assets/generated/mrs-pineda-animatronic-semirealistic.dim_400x700.png",
+  coachStutz:
+    "/assets/generated/coach-stutz-animatronic-semirealistic.dim_400x700.png",
+  mrMoody:
+    "/assets/generated/mr-moody-animatronic-semirealistic.dim_400x700.png",
+  coachWolferd: "/assets/generated/coach-wolferd-animatronic.dim_400x700.png",
 };
 
 interface GameScreenProps {
@@ -31,6 +51,7 @@ interface GameScreenProps {
   onLeftDoor: () => void;
   onRightDoor: () => void;
   onCamera: () => void;
+  onResolvePowerMinigame: (success: boolean) => void;
 }
 
 export default function GameScreen({
@@ -38,14 +59,42 @@ export default function GameScreen({
   onLeftDoor,
   onRightDoor,
   onCamera,
+  onResolvePowerMinigame,
 }: GameScreenProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const flickerRef = useRef(1.0);
   const flickerTimerRef = useRef(0);
   const animFrameRef = useRef<number | null>(null);
+  // Image cache for animatronic full-body images
+  const imgCacheRef = useRef<Partial<Record<AnimatronicId, HTMLImageElement>>>(
+    {},
+  );
+
+  // Preload all animatronic images on mount
+  useEffect(() => {
+    const ids: AnimatronicId[] = [
+      "missRojas",
+      "mrsPineda",
+      "coachStutz",
+      "mrMoody",
+      "coachWolferd",
+    ];
+    for (const id of ids) {
+      const img = new Image();
+      img.src = ANIMATRONIC_IMAGES[id];
+      imgCacheRef.current[id] = img;
+    }
+  }, []);
+
+  // Play Wolferd warning sound when wolferdJustSpawned becomes true
+  useEffect(() => {
+    if (state.wolferdJustSpawned) {
+      playWolferdWarningSound();
+    }
+  }, [state.wolferdJustSpawned]);
 
   const getTimeString = (seconds: number): string => {
-    const hour = Math.floor((seconds / 90) * 6);
+    const hour = Math.floor((seconds / 150) * 6);
     const hourLabels = [
       "12 AM",
       "1 AM",
@@ -167,7 +216,7 @@ export default function GameScreen({
 
       // Check if animatronic at left door
       const leftAnm = state.animatronics.find(
-        (a) => a.currentRoom === "LEFT_DOOR",
+        (a) => a.currentRoom === "LEFT_DOOR" && !a.isWalking && a.active,
       );
       if (leftAnm && !leftDoorClosed) {
         // Draw eerie eyes in the darkness
@@ -234,7 +283,7 @@ export default function GameScreen({
       }
 
       const rightAnm = state.animatronics.find(
-        (a) => a.currentRoom === "RIGHT_DOOR",
+        (a) => a.currentRoom === "RIGHT_DOOR" && !a.isWalking && a.active,
       );
       if (rightAnm && !rightDoorClosed) {
         const eyeY = doorY + doorH * 0.35;
@@ -266,12 +315,148 @@ export default function GameScreen({
       ctx.lineWidth = 3;
       ctx.strokeRect(deskX, deskY, deskW, deskH);
 
-      // Monitor screens on desk
+      // 3D printed fidgets on desk
+      // Fidget 1 - spinner shape
+      const f1x = deskX + deskW * 0.08;
+      const f1y = deskY + deskH * 0.35;
+      ctx.fillStyle = "#1a3a2a";
+      ctx.strokeStyle = "#2a5a3a";
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 3; i++) {
+        const angle = (i / 3) * Math.PI * 2;
+        const bx = f1x + Math.cos(angle) * 9;
+        const by = f1y + Math.sin(angle) * 9;
+        ctx.beginPath();
+        ctx.arc(bx, by, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#2a5a4a";
+      ctx.beginPath();
+      ctx.arc(f1x, f1y, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fidget 2 - cube
+      const f2x = deskX + deskW * 0.14;
+      const f2y = deskY + deskH * 0.3;
+      const cubeSize = 10;
+      ctx.fillStyle = "#1a2e22";
+      ctx.strokeStyle = "#2a4a30";
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(f2x, f2y, cubeSize, cubeSize);
+      ctx.strokeRect(f2x, f2y, cubeSize, cubeSize);
+      // cube top face
+      ctx.beginPath();
+      ctx.moveTo(f2x, f2y);
+      ctx.lineTo(f2x + 6, f2y - 5);
+      ctx.lineTo(f2x + cubeSize + 6, f2y - 5);
+      ctx.lineTo(f2x + cubeSize, f2y);
+      ctx.closePath();
+      ctx.fillStyle = "#2a3e28";
+      ctx.fill();
+      ctx.strokeStyle = "#3a5a38";
+      ctx.stroke();
+
+      // Monitor on desk (Coach Stutz's security monitor)
+      const monW = deskW * 0.22;
+      const monH = deskH * 0.8;
+      const monX = deskX + deskW * 0.5 - monW / 2;
+      const monY = deskY - monH + 8;
+
+      // Monitor stand
+      ctx.fillStyle = "#0a1a0e";
+      ctx.fillRect(monX + monW * 0.4, deskY - 8, monW * 0.2, 12);
+      ctx.fillRect(monX + monW * 0.25, deskY - 2, monW * 0.5, 6);
+
+      // Monitor body
+      ctx.fillStyle = "#060e08";
+      ctx.strokeStyle = "#22aa55";
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = "#00ff88";
+      ctx.strokeRect(monX, monY, monW, monH * 0.88);
+      ctx.shadowBlur = 0;
+      ctx.fillRect(monX, monY, monW, monH * 0.88);
+
+      // Monitor screen - shows camera feed
+      const screenX = monX + 4;
+      const screenY = monY + 4;
+      const screenW = monW - 8;
+      const screenH = monH * 0.88 - 8;
+
+      // Screen background - green CRT
+      const screenGrad = ctx.createLinearGradient(
+        screenX,
+        screenY,
+        screenX,
+        screenY + screenH,
+      );
+      screenGrad.addColorStop(0, "#0a2218");
+      screenGrad.addColorStop(1, "#041008");
+      ctx.fillStyle = screenGrad;
+      ctx.fillRect(screenX, screenY, screenW, screenH);
+
+      // Show a camera feed preview - small grid of cam views
+      const camCols = 2;
+      const camRows = 2;
+      const camCellW = screenW / camCols;
+      const camCellH = screenH / camRows;
+      const camLabels = ["CAM1", "CAM2", "L-CAM", "R-CAM"];
+      for (let ci = 0; ci < 4; ci++) {
+        const cc = ci % camCols;
+        const cr = Math.floor(ci / camCols);
+        const cx2 = screenX + cc * camCellW;
+        const cy2 = screenY + cr * camCellH;
+        ctx.fillStyle = `rgba(0,${20 + Math.random() * 8},${8 + Math.random() * 4},0.6)`;
+        ctx.fillRect(cx2, cy2, camCellW, camCellH);
+        ctx.strokeStyle = "rgba(0,80,30,0.5)";
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(cx2, cy2, camCellW, camCellH);
+        ctx.font = "bold 5px monospace";
+        ctx.fillStyle = "#22ff66";
+        ctx.textAlign = "left";
+        ctx.fillText(camLabels[ci], cx2 + 2, cy2 + 8);
+
+        // Draw a dot if animatronic is in this cam
+        const camMap: Record<number, string[]> = {
+          0: ["Cam1"],
+          1: ["Cam2", "Cam3"],
+          2: ["LEFT_CAM"],
+          3: ["RIGHT_CAM"],
+        };
+        const hasAnm = state.animatronics.some(
+          (a) => a.active && camMap[ci]?.includes(a.currentRoom),
+        );
+        if (hasAnm) {
+          ctx.fillStyle = "#ff4444";
+          ctx.shadowBlur = 4;
+          ctx.shadowColor = "#ff0000";
+          ctx.beginPath();
+          ctx.arc(cx2 + camCellW - 6, cy2 + 7, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      // Scan lines on monitor screen
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      for (let y = screenY; y < screenY + screenH; y += 2) {
+        ctx.fillRect(screenX, y, screenW, 1);
+      }
+
+      // "SECURITY" label on monitor
+      ctx.font = "bold 5px monospace";
+      ctx.fillStyle = "#44ff88";
+      ctx.textAlign = "center";
+      ctx.fillText("SECURITY", monX + monW / 2, monY + monH * 0.88 + 8);
+
+      // Regular monitors on desk (left and right of center)
       const monitorColors = ["#0a2a18", "#0a1a24"];
       for (let i = 0; i < 2; i++) {
-        const mX = deskX + deskW * 0.2 + i * (deskW * 0.35);
+        const side = i === 0 ? -1 : 1;
+        const mX = deskX + deskW * (i === 0 ? 0.22 : 0.62);
         const mY = deskY + 10;
-        const mW = deskW * 0.28;
+        const mW = deskW * 0.2;
         const mH = deskH * 0.55;
 
         ctx.fillStyle = "#060e08";
@@ -281,10 +466,10 @@ export default function GameScreen({
         ctx.fillRect(mX, mY, mW, mH);
 
         // Screen glow
-        const screenGrad = ctx.createLinearGradient(mX, mY, mX, mY + mH);
-        screenGrad.addColorStop(0, monitorColors[i]);
-        screenGrad.addColorStop(1, "#030806");
-        ctx.fillStyle = screenGrad;
+        const screenGrad2 = ctx.createLinearGradient(mX, mY, mX, mY + mH);
+        screenGrad2.addColorStop(0, monitorColors[i]);
+        screenGrad2.addColorStop(1, "#030806");
+        ctx.fillStyle = screenGrad2;
         ctx.fillRect(mX + 3, mY + 3, mW - 6, mH - 6);
 
         // Scan lines on monitor
@@ -292,6 +477,8 @@ export default function GameScreen({
         for (let y = mY + 3; y < mY + mH - 3; y += 3) {
           ctx.fillRect(mX + 3, y, mW - 6, 1);
         }
+
+        void side; // suppress unused var warning
       }
 
       // Vignette
@@ -311,24 +498,121 @@ export default function GameScreen({
     [state],
   );
 
+  // Helper: draw a single animatronic in a camera cell with full-body image
+  const drawAnimatronicInCell = useCallback(
+    (
+      ctx: CanvasRenderingContext2D,
+      anm: AnimatronicState,
+      cx: number,
+      cy: number,
+      cellW: number,
+      cellH: number,
+      opacity: number,
+    ) => {
+      const img = imgCacheRef.current[anm.id];
+      const color = ANIMATRONIC_COLORS[anm.id];
+
+      ctx.save();
+      ctx.globalAlpha = opacity;
+
+      if (img?.complete && img.naturalWidth > 0) {
+        // Fit the image into the cell maintaining aspect ratio
+        const imgAspect = img.naturalWidth / img.naturalHeight;
+        const cellAspect = cellW / cellH;
+        let drawW: number;
+        let drawH: number;
+        if (imgAspect > cellAspect) {
+          drawW = cellW * 0.85;
+          drawH = drawW / imgAspect;
+        } else {
+          drawH = cellH * 0.85;
+          drawW = drawH * imgAspect;
+        }
+        const drawX = cx + (cellW - drawW) / 2;
+        const drawY = cy + (cellH - drawH) / 2;
+
+        // Apply green tint using composite
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+        // Green tint overlay on the image
+        ctx.globalCompositeOperation = "multiply";
+        ctx.fillStyle = "rgba(0, 200, 80, 0.3)";
+        ctx.fillRect(drawX, drawY, drawW, drawH);
+        ctx.globalCompositeOperation = "source-over";
+
+        // Coach Wolferd gets a yellow warning flash effect
+        if (anm.id === "coachWolferd") {
+          ctx.globalCompositeOperation = "screen";
+          ctx.fillStyle = "rgba(255, 220, 0, 0.15)";
+          ctx.fillRect(drawX, drawY, drawW, drawH);
+          ctx.globalCompositeOperation = "source-over";
+        }
+      } else {
+        // Fallback: glowing dot
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = color;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(cx + cellW * 0.5, cy + cellH * 0.55, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+
+      // Small label badge in corner
+      const badgeX = cx + 4;
+      const badgeY = cy + cellH - 20;
+      ctx.globalAlpha = opacity;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = `${color}cc`;
+      ctx.fillRect(badgeX, badgeY, 22, 16);
+      ctx.font = "bold 9px 'Outfit', monospace";
+      ctx.fillStyle = "#000000";
+      ctx.textAlign = "center";
+      ctx.fillText(ANIMATRONIC_INITIALS[anm.id], badgeX + 11, badgeY + 11);
+
+      // Wolferd gets a "RARE!" warning label
+      if (anm.id === "coachWolferd") {
+        ctx.globalAlpha = opacity;
+        ctx.fillStyle = "rgba(255, 220, 0, 0.9)";
+        ctx.fillRect(cx + cellW - 36, badgeY, 34, 16);
+        ctx.font = "bold 8px 'Outfit', monospace";
+        ctx.fillStyle = "#000000";
+        ctx.textAlign = "center";
+        ctx.fillText("RARE!", cx + cellW - 36 + 17, badgeY + 11);
+      }
+
+      ctx.restore();
+    },
+    [],
+  );
+
   const drawCameraOverlay = useCallback(
     (ctx: CanvasRenderingContext2D, w: number, h: number) => {
       // Dark overlay
       ctx.fillStyle = "rgba(0, 10, 5, 0.88)";
       ctx.fillRect(0, 0, w, h);
 
-      const padding = 16;
-      const cols = 3;
+      const padding = 12;
+      const cols = 4;
       const rows = 2;
-      const cams = ["Cam1", "Cam2", "Cam3", "Cam4", "Cam5", "Cam6"];
+      const cams = [
+        "Cam1",
+        "Cam2",
+        "Cam3",
+        "Cam4",
+        "Cam5",
+        "Cam6",
+        "LEFT_CAM",
+        "RIGHT_CAM",
+      ];
 
       const gridW = w - padding * 2;
-      const gridH = h * 0.78 - padding * 2;
+      const gridH = h * 0.76 - padding * 2;
       const cellW = (gridW - padding * (cols - 1)) / cols;
       const cellH = (gridH - padding * (rows - 1)) / rows;
-      const startY = h * 0.1;
+      const startY = h * 0.11;
 
-      ctx.font = "bold 18px 'Bricolage Grotesque', sans-serif";
+      ctx.font = "bold 16px 'Bricolage Grotesque', sans-serif";
       ctx.fillStyle = "#44ff88";
       ctx.textAlign = "center";
       ctx.fillText("▶ SECURITY CAMERAS ◀", w / 2, startY - 8);
@@ -344,7 +628,12 @@ export default function GameScreen({
         ctx.fillRect(cx, cy, cellW, cellH);
 
         // Static noise (draw random pixels)
-        const imageData = ctx.getImageData(cx, cy, cellW, cellH);
+        const imageData = ctx.getImageData(
+          cx,
+          cy,
+          Math.floor(cellW),
+          Math.floor(cellH),
+        );
         for (let p = 0; p < imageData.data.length; p += 4) {
           if (Math.random() < 0.04) {
             const v = Math.random() * 30;
@@ -372,192 +661,79 @@ export default function GameScreen({
         ctx.strokeRect(cx, cy, cellW, cellH);
 
         // Cam label
-        ctx.font = "bold 10px 'Outfit', monospace";
+        ctx.font = "bold 9px 'Outfit', monospace";
         ctx.fillStyle = "#44ff88";
         ctx.textAlign = "left";
-        ctx.fillText(cam.toUpperCase(), cx + 6, cy + 16);
+        ctx.fillText(cam.toUpperCase(), cx + 5, cy + 13);
 
         // Room name
-        ctx.font = "9px 'Outfit', monospace";
+        ctx.font = "8px 'Outfit', monospace";
         ctx.fillStyle = "#22aa55";
-        ctx.fillText(ROOM_NAMES[cam], cx + 6, cy + 28);
+        ctx.fillText(ROOM_NAMES[cam] ?? cam, cx + 5, cy + 24);
 
-        // Animatronics in this room
-        const anmsHere = state.animatronics.filter(
-          (a) => a.currentRoom === cam,
+        // Find animatronics fully in this room (only active ones)
+        const anmsFullyHere = state.animatronics.filter(
+          (a) => a.active && a.currentRoom === cam && !a.isWalking,
+        );
+        // Find animatronics walking OUT from this room (previousRoom)
+        const anmsLeaving = state.animatronics.filter(
+          (a) => a.active && a.previousRoom === cam && a.isWalking,
         );
 
-        anmsHere.forEach((anm, ai) => {
-          const dotX = cx + cellW * 0.5 + (ai - 0.5) * 20;
-          const dotY = cy + cellH * 0.55;
+        // Draw leaving (fading out) animatronics
+        for (const anm of anmsLeaving) {
+          // Opacity fades as they walk away: 1 -> 0 as walkProgress goes 0->1
+          const opacity = 0.3 + (1 - anm.walkProgress) * 0.7;
+          drawAnimatronicInCell(ctx, anm, cx, cy, cellW, cellH, opacity);
+        }
 
-          // Glowing dot
-          ctx.shadowBlur = 12;
-          ctx.shadowColor = ANIMATRONIC_COLORS[anm.id];
-          ctx.fillStyle = ANIMATRONIC_COLORS[anm.id];
-          ctx.beginPath();
-          ctx.arc(dotX, dotY, 5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-
-          // Initial
-          ctx.font = "bold 8px 'Outfit', monospace";
-          ctx.fillStyle = "#ffffff";
-          ctx.textAlign = "center";
-          ctx.fillText(ANIMATRONIC_INITIALS[anm.id], dotX, dotY + 14);
-        });
+        // Draw fully arrived animatronics
+        for (const anm of anmsFullyHere) {
+          drawAnimatronicInCell(ctx, anm, cx, cy, cellW, cellH, 1.0);
+        }
       });
 
       // Legend
-      const legendY = h * 0.88;
+      const legendY = h * 0.89;
       ctx.font = "10px 'Outfit', monospace";
       ctx.textAlign = "left";
       const anmIds: AnimatronicId[] = [
         "missRojas",
-        "mrBooks",
-        "carl",
-        "lunchLady",
+        "mrsPineda",
+        "coachStutz",
+        "mrMoody",
+        "coachWolferd",
       ];
-      const anmNames = ["Miss Rojas", "Mr. Books", "Carl", "Lunch Lady"];
+      const anmNames = [
+        "Miss Rojas",
+        "Mrs. Pineda",
+        "Coach Stutz",
+        "Mr. Moody ♥",
+        "Coach Wolferd ★",
+      ];
+      const legendSpacing = w / 5;
       anmIds.forEach((id, i) => {
-        const lx = padding + i * (w / 4);
-        ctx.fillStyle = ANIMATRONIC_COLORS[id];
-        ctx.shadowBlur = 8;
-        ctx.shadowColor = ANIMATRONIC_COLORS[id];
+        const lx = padding + i * legendSpacing;
+        const isActive = state.animatronics.find((a) => a.id === id)?.active;
+        const color = isActive ? ANIMATRONIC_COLORS[id] : "#444444";
+        ctx.fillStyle = color;
+        ctx.shadowBlur = isActive ? 8 : 0;
+        ctx.shadowColor = color;
         ctx.beginPath();
         ctx.arc(lx + 6, legendY, 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
-        ctx.fillStyle = "#88ccaa";
+        ctx.fillStyle = isActive ? "#88ccaa" : "#445544";
         ctx.fillText(anmNames[i], lx + 14, legendY + 4);
       });
 
       // "CLOSE" label at bottom
-      ctx.font = "bold 12px 'Outfit', monospace";
+      ctx.font = "bold 11px 'Outfit', monospace";
       ctx.textAlign = "center";
       ctx.fillStyle = "#44ff88";
-      ctx.fillText("[ CLICK CAMERAS TO CLOSE ]", w / 2, h * 0.96);
+      ctx.fillText("[ CLICK CAMERAS TO CLOSE ]", w / 2, h * 0.97);
     },
-    [state],
-  );
-
-  const drawJumpscare = useCallback(
-    (ctx: CanvasRenderingContext2D, w: number, h: number) => {
-      // Full red background
-      ctx.fillStyle = "#330000";
-      ctx.fillRect(0, 0, w, h);
-
-      // Load and draw the jumpscare image
-      const img = new Image();
-      img.src = "/assets/generated/miss-rojas-jumpscare.dim_800x600.png";
-      // We'll draw what we can with canvas
-
-      // Draw a terrifying face
-      const cx = w / 2;
-      const cy = h / 2;
-      const r = Math.min(w, h) * 0.35;
-
-      // Head
-      ctx.fillStyle = "#1a0505";
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Eyes (glowing red)
-      const eyeOffX = r * 0.3;
-      const eyeOffY = r * 0.15;
-
-      ctx.shadowBlur = 30;
-      ctx.shadowColor = "#ff0000";
-      ctx.fillStyle = "#ff2200";
-
-      // Left eye
-      ctx.beginPath();
-      ctx.ellipse(
-        cx - eyeOffX,
-        cy - eyeOffY,
-        r * 0.18,
-        r * 0.22,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
-
-      // Right eye
-      ctx.beginPath();
-      ctx.ellipse(
-        cx + eyeOffX,
-        cy - eyeOffY,
-        r * 0.18,
-        r * 0.22,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
-
-      // Pupils
-      ctx.fillStyle = "#000000";
-      ctx.beginPath();
-      ctx.ellipse(
-        cx - eyeOffX,
-        cy - eyeOffY,
-        r * 0.08,
-        r * 0.12,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(
-        cx + eyeOffX,
-        cy - eyeOffY,
-        r * 0.08,
-        r * 0.12,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
-
-      ctx.shadowBlur = 0;
-
-      // Mouth (wide grin)
-      const mouthY = cy + r * 0.3;
-      ctx.strokeStyle = "#ff2200";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(cx, mouthY - r * 0.1, r * 0.45, 0.1, Math.PI - 0.1);
-      ctx.stroke();
-
-      // Teeth
-      ctx.fillStyle = "#ffdddd";
-      const toothW = r * 0.08;
-      const toothH = r * 0.15;
-      const numTeeth = 7;
-      for (let i = 0; i < numTeeth; i++) {
-        const angle = 0.15 + (i / (numTeeth - 1)) * (Math.PI - 0.3);
-        const tx = cx + Math.cos(angle) * r * 0.42;
-        const ty = mouthY - r * 0.1 + Math.sin(angle) * r * 0.42;
-        ctx.save();
-        ctx.translate(tx, ty);
-        ctx.rotate(angle - Math.PI / 2);
-        ctx.fillRect(-toothW / 2, 0, toothW, toothH);
-        ctx.restore();
-      }
-
-      // Text
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = "#ff0000";
-      ctx.fillStyle = "#ff4444";
-      ctx.font = `bold ${Math.max(28, w * 0.05)}px 'Bricolage Grotesque', sans-serif`;
-      ctx.textAlign = "center";
-      ctx.fillText("SHE GOT YOU!", w / 2, h * 0.1);
-      ctx.shadowBlur = 0;
-    },
-    [],
+    [state, drawAnimatronicInCell],
   );
 
   const renderFrame = useCallback(() => {
@@ -580,9 +756,7 @@ export default function GameScreen({
       }
     }
 
-    if (state.jumpscareVisible) {
-      drawJumpscare(ctx, w, h);
-    } else if (state.cameraOpen) {
+    if (state.cameraOpen) {
       drawOfficeScene(ctx, w, h);
       drawCameraOverlay(ctx, w, h);
     } else {
@@ -590,7 +764,7 @@ export default function GameScreen({
     }
 
     animFrameRef.current = requestAnimationFrame(renderFrame);
-  }, [state, drawOfficeScene, drawCameraOverlay, drawJumpscare]);
+  }, [state, drawOfficeScene, drawCameraOverlay]);
 
   useEffect(() => {
     if (animFrameRef.current) {
@@ -613,6 +787,28 @@ export default function GameScreen({
   const timeStr = getTimeString(state.time);
   const powerColor = getPowerColor(state.power);
 
+  // Check if Wolferd is active for warning indicator
+  const wolferdActive = state.animatronics.find(
+    (a) => a.id === "coachWolferd" && a.active,
+  );
+
+  // Door proximity warnings -- only show when power > 0
+  const leftDoorThreat =
+    state.power > 0 &&
+    state.animatronics.some(
+      (a) =>
+        a.active && !a.friendly && a.currentRoom === "LEFT_CAM" && !a.isWalking,
+    );
+  const rightDoorThreat =
+    state.power > 0 &&
+    state.animatronics.some(
+      (a) =>
+        a.active &&
+        !a.friendly &&
+        a.currentRoom === "RIGHT_CAM" &&
+        !a.isWalking,
+    );
+
   return (
     <div className="relative w-full h-full flex flex-col bg-black select-none">
       {/* Canvas */}
@@ -626,6 +822,150 @@ export default function GameScreen({
         />
         {/* CRT overlay */}
         <div className="crt-overlay" />
+
+        {/* LEFT DOOR DANGER WARNING */}
+        {leftDoorThreat && !state.cameraOpen && (
+          <div
+            data-ocid="game.left_door_warning"
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1 animate-pulse"
+            style={{ maxWidth: "90px" }}
+          >
+            <div
+              className="px-2 py-2 rounded font-display font-black uppercase text-xs tracking-widest text-center"
+              style={{
+                background: "rgba(200, 30, 0, 0.25)",
+                border: "2px solid #ff3300",
+                color: "#ff5500",
+                textShadow: "0 0 10px #ff3300, 0 0 20px #ff0000",
+                boxShadow:
+                  "0 0 15px rgba(255,50,0,0.4), inset 0 0 10px rgba(255,50,0,0.1)",
+                writingMode: "vertical-rl",
+                textOrientation: "mixed",
+                letterSpacing: "0.1em",
+              }}
+            >
+              ⚠ DANGER LEFT DOOR ⚠
+            </div>
+          </div>
+        )}
+
+        {/* RIGHT DOOR DANGER WARNING */}
+        {rightDoorThreat && !state.cameraOpen && (
+          <div
+            data-ocid="game.right_door_warning"
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1 animate-pulse"
+            style={{ maxWidth: "90px" }}
+          >
+            <div
+              className="px-2 py-2 rounded font-display font-black uppercase text-xs tracking-widest text-center"
+              style={{
+                background: "rgba(200, 30, 0, 0.25)",
+                border: "2px solid #ff3300",
+                color: "#ff5500",
+                textShadow: "0 0 10px #ff3300, 0 0 20px #ff0000",
+                boxShadow:
+                  "0 0 15px rgba(255,50,0,0.4), inset 0 0 10px rgba(255,50,0,0.1)",
+                writingMode: "vertical-rl",
+                textOrientation: "mixed",
+                letterSpacing: "0.1em",
+              }}
+            >
+              ⚠ DANGER RIGHT DOOR ⚠
+            </div>
+          </div>
+        )}
+
+        {/* Wolferd dramatic full-screen spawn warning */}
+        {state.wolferdJustSpawned && (
+          <div
+            data-ocid="game.wolferd_spawn_warning"
+            className="absolute inset-0 z-35 flex items-center justify-center pointer-events-none animate-pulse"
+            style={{
+              background: "rgba(255, 200, 0, 0.08)",
+              border: "4px solid rgba(255, 220, 0, 0.7)",
+              boxShadow:
+                "inset 0 0 80px rgba(255,200,0,0.15), 0 0 40px rgba(255,200,0,0.3)",
+            }}
+          >
+            <div
+              className="text-center px-8 py-6 rounded-lg"
+              style={{
+                background: "rgba(0,0,0,0.7)",
+                border: "2px solid rgba(255,220,0,0.8)",
+                boxShadow: "0 0 30px rgba(255,200,0,0.4)",
+              }}
+            >
+              <div
+                className="font-display font-black uppercase tracking-widest"
+                style={{
+                  fontSize: "clamp(1.4rem, 3.5vw, 2.8rem)",
+                  color: "#ffdd00",
+                  textShadow: "0 0 20px #ffdd00, 0 0 50px #ffaa00",
+                  letterSpacing: "0.12em",
+                }}
+              >
+                ⚠ COACH WOLFERD HAS SPAWNED! ⚠
+              </div>
+              <div
+                className="font-display font-bold uppercase tracking-widest text-sm mt-2"
+                style={{ color: "rgba(255,200,0,0.7)" }}
+              >
+                THE WOLF IS ON THE LOOSE — BEWARE!
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Coach Wolferd active indicator (smaller, stays while active) */}
+        {wolferdActive && !state.wolferdJustSpawned && (
+          <div
+            data-ocid="game.wolferd_active_indicator"
+            className="absolute top-2 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded font-display font-black uppercase text-xs tracking-widest animate-pulse"
+            style={{
+              background: "rgba(255, 220, 0, 0.15)",
+              border: "1px solid #ffdd00",
+              color: "#ffdd00",
+              textShadow: "0 0 10px #ffdd00",
+            }}
+          >
+            ⚠ COACH WOLFERD SPOTTED ⚠
+          </div>
+        )}
+
+        {/* Power Minigame overlay */}
+        {state.powerMinigameActive && (
+          <PowerMinigame
+            onSuccess={() => onResolvePowerMinigame(true)}
+            onFailure={() => onResolvePowerMinigame(false)}
+          />
+        )}
+
+        {/* Jumpscare -- React img overlay instead of canvas drawing */}
+        {state.jumpscareVisible && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center">
+            {/* Red tint overlay */}
+            <div className="absolute inset-0 bg-red-900/60 z-10 mix-blend-multiply" />
+            <img
+              src="/assets/generated/mrs-rojas-jumpscare.dim_800x600.png"
+              alt="JUMPSCARE"
+              className="absolute inset-0 w-full h-full object-cover z-20"
+              style={{ filter: "brightness(1.1) saturate(1.3)" }}
+            />
+            {/* Text overlay */}
+            <div
+              className="absolute top-6 left-0 right-0 text-center z-30 font-display font-black uppercase tracking-widest"
+              style={{
+                fontSize: "clamp(1.5rem, 4vw, 3rem)",
+                color: "#ff4444",
+                textShadow: "0 0 20px #ff0000, 0 0 40px #ff0000",
+              }}
+            >
+              {state.jumpscareAnm === "coachWolferd"
+                ? "THE WOLF GOT YOU!"
+                : "SHE GOT YOU!"}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* HUD */}
@@ -689,21 +1029,31 @@ export default function GameScreen({
           </div>
 
           {/* Animatronic status */}
-          <div className="flex gap-2 text-[9px] font-body tracking-wide">
+          <div className="flex gap-2 text-[9px] font-body tracking-wide flex-wrap">
             {state.animatronics.map((anm) => (
               <div
                 key={anm.id}
                 className="flex items-center gap-1"
                 style={{
-                  color: anm.atDoor ? ANIMATRONIC_COLORS[anm.id] : "#446644",
+                  color: anm.active
+                    ? anm.atDoor
+                      ? ANIMATRONIC_COLORS[anm.id]
+                      : "#446644"
+                    : "#333333",
+                  opacity: anm.active ? 1 : 0.4,
                 }}
               >
                 <div
-                  className={`w-1.5 h-1.5 rounded-full ${anm.atDoor ? "animate-pulse" : ""}`}
+                  className={`w-1.5 h-1.5 rounded-full ${anm.active && anm.atDoor ? "animate-pulse" : anm.active && anm.isWalking ? "animate-ping" : ""}`}
                   style={{
-                    backgroundColor: anm.atDoor
-                      ? ANIMATRONIC_COLORS[anm.id]
-                      : "#224422",
+                    backgroundColor: anm.active
+                      ? anm.atDoor
+                        ? ANIMATRONIC_COLORS[anm.id]
+                        : anm.isWalking
+                          ? ANIMATRONIC_COLORS[anm.id]
+                          : "#224422"
+                      : "#222222",
+                    opacity: anm.isWalking ? 0.6 : 1,
                   }}
                 />
                 <span className="hidden sm:inline">
@@ -712,6 +1062,12 @@ export default function GameScreen({
                 <span className="sm:hidden">
                   {ANIMATRONIC_INITIALS[anm.id]}
                 </span>
+                {anm.active && anm.isWalking && (
+                  <span className="opacity-60 text-[8px]">→</span>
+                )}
+                {!anm.active && anm.rareSpawn && (
+                  <span className="opacity-40 text-[7px]">?</span>
+                )}
               </div>
             ))}
           </div>
@@ -765,4 +1121,69 @@ export default function GameScreen({
       </div>
     </div>
   );
+}
+
+function playWolferdWarningSound() {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (
+        window as unknown as {
+          webkitAudioContext: typeof AudioContext;
+        }
+      ).webkitAudioContext;
+    const ctx = new AudioCtx();
+
+    // Wolf howl: rising oscillator with vibrato
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    const vibratoOsc = ctx.createOscillator();
+    const vibratoGain = ctx.createGain();
+
+    // Vibrato LFO
+    vibratoOsc.type = "sine";
+    vibratoOsc.frequency.setValueAtTime(5, ctx.currentTime);
+    vibratoGain.gain.setValueAtTime(15, ctx.currentTime);
+    vibratoGain.gain.linearRampToValueAtTime(30, ctx.currentTime + 0.6);
+    vibratoOsc.connect(vibratoGain);
+    vibratoGain.connect(osc.frequency);
+
+    // Main howl tone - starts low, rises like a howl
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(150, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.5);
+    osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 1.0);
+    osc.frequency.exponentialRampToValueAtTime(500, ctx.currentTime + 1.4);
+    osc.frequency.exponentialRampToValueAtTime(250, ctx.currentTime + 1.8);
+
+    gainNode.gain.setValueAtTime(0, ctx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.35, ctx.currentTime + 0.15);
+    gainNode.gain.setValueAtTime(0.35, ctx.currentTime + 1.4);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.0);
+
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    vibratoOsc.start(ctx.currentTime);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 2.0);
+    vibratoOsc.stop(ctx.currentTime + 2.0);
+
+    // Second layer: growl undertone
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = "sawtooth";
+    osc2.frequency.setValueAtTime(80, ctx.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.8);
+    osc2.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 1.8);
+    gain2.gain.setValueAtTime(0, ctx.currentTime);
+    gain2.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.2);
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.8);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(ctx.currentTime);
+    osc2.stop(ctx.currentTime + 1.8);
+  } catch {
+    // Audio not available
+  }
 }

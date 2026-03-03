@@ -3,17 +3,29 @@ import { useActor } from "./useActor";
 
 export type GameScreen = "start" | "game" | "gameover" | "winnight" | "wingame";
 
-export type AnimatronicId = "missRojas" | "mrBooks" | "carl" | "lunchLady";
+export type AnimatronicId =
+  | "missRojas"
+  | "mrsPineda"
+  | "coachStutz"
+  | "mrMoody"
+  | "coachWolferd";
 
 export interface AnimatronicState {
   id: AnimatronicId;
   name: string;
-  currentRoom: string;
+  currentRoom: string; // where they ARE (fully arrived)
+  previousRoom: string; // where they came from (for walk animation)
+  walkProgress: number; // 0 = just left previousRoom, 1 = fully arrived
+  isWalking: boolean; // true while walking animation is in progress
   path: string[];
   side: "left" | "right";
   moveTimer: number;
   retreatTimer: number;
   atDoor: boolean;
+  friendly: boolean; // Mr. Moody doesn't kill the player
+  active: boolean; // whether this animatronic has spawned yet
+  rareSpawn: boolean; // Coach Wolferd: spawns rarely and retreats quickly
+  rareTimer: number; // timer for rare animatronics to auto-retreat
 }
 
 export interface GameState {
@@ -23,7 +35,7 @@ export interface GameState {
   leftDoorClosed: boolean;
   rightDoorClosed: boolean;
   cameraOpen: boolean;
-  time: number; // seconds elapsed (0-90)
+  time: number; // seconds elapsed (0-150)
   animatronics: AnimatronicState[];
   jumpscareVisible: boolean;
   jumpscareAnm: AnimatronicId | null;
@@ -31,60 +43,90 @@ export interface GameState {
   bestNight: number;
   bestTime: number;
   loadingScore: boolean;
+  powerMinigameActive: boolean; // true when power hits 0 and minigame is running
+  wolferdJustSpawned: boolean; // true for ~2.5 seconds after Wolferd spawns
 }
 
-const NIGHT_DURATION = 90; // seconds
-const BASE_DRAIN = 1.5; // %/sec
-const DOOR_DRAIN = 1.0; // % per closed door /sec
-const CAMERA_DRAIN = 0.5; // %/sec when camera open
+const NIGHT_DURATION = 150; // seconds (slower)
+const BASE_DRAIN = 0.6; // %/sec (slower)
+const DOOR_DRAIN = 0.4; // % per closed door /sec (slower)
+const CAMERA_DRAIN = 0.3; // %/sec when camera open (slower)
 
 const TICK_INTERVAL = 5000; // ms between AI ticks
 
+// Coach Wolferd: rare spawn chance per tick (3%), active for only ~10-15 ticks before retreating
+const WOLFERD_SPAWN_CHANCE = 0.03;
+const WOLFERD_MAX_TICKS = 3; // auto-retreats after this many ticks at door
+
+// Coach Stutz walks at 1.5x the normal speed (walkProgress advances faster)
+const STUTZ_WALK_SPEED = 1.5;
+
 const ANIMATRONIC_PATHS: Record<
   AnimatronicId,
-  { path: string[]; side: "left" | "right"; name: string }
+  {
+    path: string[];
+    side: "left" | "right";
+    name: string;
+    friendly?: boolean;
+    rareSpawn?: boolean;
+  }
 > = {
   missRojas: {
     name: "Miss Rojas",
-    path: ["Cam1", "Cam2", "Cam4", "LEFT_DOOR"],
+    path: ["Cam1", "Cam2", "Cam4", "LEFT_CAM", "LEFT_DOOR"],
     side: "left",
   },
-  mrBooks: {
-    name: "Mr. Books",
-    path: ["Cam3", "Cam5", "RIGHT_DOOR"],
+  mrsPineda: {
+    name: "Mrs. Pineda",
+    path: ["Cam3", "Cam5", "RIGHT_CAM", "RIGHT_DOOR"],
     side: "right",
   },
-  carl: {
-    name: "Carl the Janitor",
-    path: ["Cam2", "Cam4", "LEFT_DOOR"],
+  coachStutz: {
+    name: "Coach Stutz",
+    path: ["Cam2", "Cam4", "LEFT_CAM", "LEFT_DOOR"],
     side: "left",
   },
-  lunchLady: {
-    name: "Lunch Lady",
-    path: ["Cam6", "Cam5", "RIGHT_DOOR"],
+  mrMoody: {
+    name: "Mr. Moody",
+    path: ["Cam6", "Cam5", "RIGHT_CAM", "RIGHT_DOOR"],
     side: "right",
+    friendly: true,
+  },
+  coachWolferd: {
+    name: "Coach Wolferd",
+    path: ["Cam3", "Cam2", "RIGHT_CAM", "RIGHT_DOOR"],
+    side: "right",
+    rareSpawn: true,
   },
 };
 
 function createInitialAnimatronics(): AnimatronicState[] {
   return (Object.keys(ANIMATRONIC_PATHS) as AnimatronicId[]).map((id) => {
     const def = ANIMATRONIC_PATHS[id];
+    const isRare = def.rareSpawn ?? false;
     return {
       id,
       name: def.name,
       currentRoom: def.path[0],
+      previousRoom: def.path[0],
+      walkProgress: 1,
+      isWalking: false,
       path: def.path,
       side: def.side,
       moveTimer: 0,
       retreatTimer: 0,
       atDoor: false,
+      friendly: def.friendly ?? false,
+      active: !isRare, // rare spawns start inactive
+      rareSpawn: isRare,
+      rareTimer: 0,
     };
   });
 }
 
 function getMoveChance(night: number): number {
-  // Night 1: 10%, Night 5: 40%
-  return 0.1 + (night - 1) * 0.075;
+  // Night 1: 15%, Night 5: 55%
+  return 0.15 + (night - 1) * 0.1;
 }
 
 export function useGameEngine() {
@@ -105,6 +147,8 @@ export function useGameEngine() {
     bestNight: 0,
     bestTime: 0,
     loadingScore: true,
+    powerMinigameActive: false,
+    wolferdJustSpawned: false,
   });
 
   // Refs for game loop
@@ -114,9 +158,11 @@ export function useGameEngine() {
   const lastAiTickRef = useRef<number>(0);
   const gameActiveRef = useRef(false);
   const startTimeRef = useRef<number>(0);
+  const elapsedOffsetRef = useRef<number>(0); // tracks elapsed time for resume
   const jumpscareTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const wolferdSpawnTimerRef = useRef<number>(0); // timestamp of last Wolferd spawn
 
   // Keep ref in sync
   useEffect(() => {
@@ -195,9 +241,15 @@ export function useGameEngine() {
       if (!gameActiveRef.current) return;
 
       const s = stateRef.current;
-      const elapsed = (timestamp - startTimeRef.current) / 1000;
+      const elapsed =
+        elapsedOffsetRef.current + (timestamp - startTimeRef.current) / 1000;
       const dtSec = (timestamp - lastTickRef.current) / 1000;
       lastTickRef.current = timestamp;
+
+      // Update wolferdJustSpawned based on timer
+      const wolferdSpawnedRecently =
+        wolferdSpawnTimerRef.current > 0 &&
+        Date.now() - wolferdSpawnTimerRef.current < 2500;
 
       // Power drain
       let drainRate = BASE_DRAIN;
@@ -231,67 +283,170 @@ export function useGameEngine() {
         return;
       }
 
-      // Power out!
-      if (newPower <= 0) {
-        triggerJumpscare("missRojas", s.night, Math.floor(elapsed));
-        setState((prev) => ({ ...prev, power: 0, time: newTime }));
+      // Power out! Start minigame instead of instant death
+      if (newPower <= 0 && !s.powerMinigameActive) {
+        gameActiveRef.current = false;
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current);
+          animFrameRef.current = null;
+        }
+        // Store elapsed time so we can resume from here
+        elapsedOffsetRef.current = elapsed;
+        setState((prev) => ({
+          ...prev,
+          power: 0,
+          time: newTime,
+          powerMinigameActive: true,
+        }));
         return;
       }
 
+      // Update walking progress for all animatronics
+      let newAnimatronics = s.animatronics.map((anm) => {
+        if (!anm.isWalking) return anm;
+        // Coach Stutz walks faster
+        const speed = anm.id === "coachStutz" ? STUTZ_WALK_SPEED : 1.0;
+        const newProgress = Math.min(
+          1,
+          anm.walkProgress + (dtSec / 2.5) * speed,
+        );
+        const doneWalking = newProgress >= 1;
+        return {
+          ...anm,
+          walkProgress: newProgress,
+          isWalking: !doneWalking,
+        };
+      });
+
       // AI ticks
       const aiDt = timestamp - lastAiTickRef.current;
-      let newAnimatronics = [...s.animatronics];
       let gameOver = false;
       let killerAnm: AnimatronicId | null = null;
+      let wolferdJustSpawnedThisTick = false;
 
       if (aiDt >= TICK_INTERVAL) {
         lastAiTickRef.current = timestamp;
         const moveChance = getMoveChance(s.night);
 
-        newAnimatronics = s.animatronics.map((anm) => {
+        newAnimatronics = newAnimatronics.map((anm) => {
           const updated = { ...anm };
+
+          // Try to spawn Coach Wolferd if inactive
+          if (updated.rareSpawn && !updated.active) {
+            if (Math.random() < WOLFERD_SPAWN_CHANCE) {
+              updated.active = true;
+              updated.currentRoom = updated.path[0];
+              updated.previousRoom = updated.path[0];
+              updated.rareTimer = 0;
+              // Mark Wolferd as just spawned
+              wolferdSpawnTimerRef.current = Date.now();
+              wolferdJustSpawnedThisTick = true;
+            }
+            return updated;
+          }
+
+          // Skip inactive animatronics
+          if (!updated.active) return updated;
+
+          // Skip animatronics still walking
+          if (updated.isWalking) return updated;
 
           if (updated.atDoor) {
             const doorClosed =
               updated.side === "left" ? s.leftDoorClosed : s.rightDoorClosed;
 
+            // Rare animatronics (Wolferd) auto-retreat quickly
+            if (updated.rareSpawn) {
+              updated.rareTimer += 1;
+              if (updated.rareTimer >= WOLFERD_MAX_TICKS || doorClosed) {
+                // Retreat and go inactive
+                updated.currentRoom = updated.path[0];
+                updated.previousRoom = updated.path[updated.path.length - 1];
+                updated.walkProgress = 0;
+                updated.isWalking = true;
+                updated.atDoor = false;
+                updated.rareTimer = 0;
+                updated.active = false;
+                return updated;
+              }
+              // Wolferd at door with it open -- death handled on arrival in collision check
+              return updated;
+            }
+
             if (!doorClosed) {
-              gameOver = true;
-              killerAnm = updated.id;
+              // Friendly animatronics retreat instead of killing
+              if (updated.friendly) {
+                updated.currentRoom = updated.path[0];
+                updated.previousRoom = updated.path[updated.path.length - 1];
+                updated.walkProgress = 0;
+                updated.isWalking = true;
+                updated.atDoor = false;
+                updated.retreatTimer = 0;
+                return updated;
+              }
+              // Door is open but we only kill on arrival (handled in collision check below)
               return updated;
             }
 
             updated.retreatTimer += 1;
             if (updated.retreatTimer >= 2 && Math.random() < 0.3) {
+              updated.previousRoom = updated.currentRoom;
               updated.currentRoom = updated.path[0];
+              updated.walkProgress = 0;
+              updated.isWalking = true;
               updated.atDoor = false;
               updated.retreatTimer = 0;
             }
             return updated;
           }
 
-          if (Math.random() < moveChance) {
+          // Mr. Moody has a lower move chance (quarter) -- very chill
+          // Coach Stutz has higher move chance (1.5x) -- fast
+          let effectiveMoveChance = moveChance;
+          if (updated.friendly) {
+            effectiveMoveChance = moveChance * 0.25;
+          } else if (updated.id === "coachStutz") {
+            effectiveMoveChance = moveChance * 1.5;
+          } else if (updated.rareSpawn) {
+            // Wolferd moves fast when active
+            effectiveMoveChance = moveChance * 2.0;
+          }
+
+          if (Math.random() < effectiveMoveChance) {
             const currentIndex = updated.path.indexOf(updated.currentRoom);
             if (currentIndex < updated.path.length - 1) {
               const nextRoom = updated.path[currentIndex + 1];
+              updated.previousRoom = updated.currentRoom;
               updated.currentRoom = nextRoom;
+              updated.walkProgress = 0;
+              updated.isWalking = true;
 
               if (nextRoom === "LEFT_DOOR" || nextRoom === "RIGHT_DOOR") {
                 updated.atDoor = true;
-                const doorClosed =
-                  updated.side === "left"
-                    ? s.leftDoorClosed
-                    : s.rightDoorClosed;
-                if (!doorClosed) {
-                  gameOver = true;
-                  killerAnm = updated.id;
-                }
               }
             }
           }
 
           return updated;
         });
+
+        // Check door collisions: only trigger death when an animatronic
+        // JUST arrived at the door this tick (walkProgress went from <1 to 1)
+        for (let i = 0; i < newAnimatronics.length; i++) {
+          const anm = newAnimatronics[i];
+          const prev = s.animatronics[i];
+          if (!anm.active) continue;
+          if (anm.friendly) continue;
+          // Only trigger when they just finished walking INTO a door room
+          const justArrived = prev.isWalking && !anm.isWalking && anm.atDoor;
+          if (!justArrived) continue;
+          const doorClosed =
+            anm.side === "left" ? s.leftDoorClosed : s.rightDoorClosed;
+          if (!doorClosed) {
+            gameOver = true;
+            killerAnm = anm.id;
+          }
+        }
       }
 
       if (gameOver && killerAnm) {
@@ -300,6 +455,8 @@ export function useGameEngine() {
           animatronics: newAnimatronics,
           power: newPower,
           time: newTime,
+          wolferdJustSpawned:
+            wolferdSpawnedRecently || wolferdJustSpawnedThisTick,
         }));
         triggerJumpscare(killerAnm, s.night, Math.floor(elapsed));
         return;
@@ -310,6 +467,8 @@ export function useGameEngine() {
         power: newPower,
         time: newTime,
         animatronics: newAnimatronics,
+        wolferdJustSpawned:
+          wolferdSpawnedRecently || wolferdJustSpawnedThisTick,
       }));
 
       animFrameRef.current = requestAnimationFrame(runGameLoop);
@@ -329,6 +488,8 @@ export function useGameEngine() {
       const initialAnimatronics = createInitialAnimatronics();
       gameActiveRef.current = true;
       lastAiTickRef.current = performance.now();
+      elapsedOffsetRef.current = 0;
+      wolferdSpawnTimerRef.current = 0;
 
       setState((prev) => ({
         ...prev,
@@ -343,6 +504,8 @@ export function useGameEngine() {
         jumpscareVisible: false,
         jumpscareAnm: null,
         survivedNight: 0,
+        powerMinigameActive: false,
+        wolferdJustSpawned: false,
       }));
 
       requestAnimationFrame((ts) => {
@@ -353,6 +516,36 @@ export function useGameEngine() {
       });
     },
     [runGameLoop],
+  );
+
+  const resolvePowerMinigame = useCallback(
+    (success: boolean) => {
+      const s = stateRef.current;
+      if (success) {
+        // Restore power to 40% and resume the game
+        setState((prev) => ({
+          ...prev,
+          power: 40,
+          powerMinigameActive: false,
+        }));
+
+        // Resume game loop: reset start time ref so elapsed continues from offset
+        gameActiveRef.current = true;
+        requestAnimationFrame((ts) => {
+          startTimeRef.current = ts;
+          lastTickRef.current = ts;
+          animFrameRef.current = requestAnimationFrame(runGameLoop);
+        });
+      } else {
+        // Minigame failed - trigger jumpscare
+        setState((prev) => ({
+          ...prev,
+          powerMinigameActive: false,
+        }));
+        triggerJumpscare("missRojas", s.night, Math.floor(s.time));
+      }
+    },
+    [runGameLoop, triggerJumpscare],
   );
 
   const toggleLeftDoor = useCallback(() => {
@@ -403,6 +596,7 @@ export function useGameEngine() {
     goToMenu,
     retryNight,
     goToNextNight,
+    resolvePowerMinigame,
   };
 }
 

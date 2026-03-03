@@ -1,7 +1,31 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import GameScreen from "./GameScreen";
-import { useGameEngine } from "./hooks/useGameEngine";
+import { type AnimatronicId, useGameEngine } from "./hooks/useGameEngine";
+
+const KILLER_INFO: Record<AnimatronicId, { displayName: string; tip: string }> =
+  {
+    missRojas: {
+      displayName: "Miss Rojas",
+      tip: "She comes from the LEFT. Watch the left camera and close the left door when she reaches LEFT DOOR CAM.",
+    },
+    mrsPineda: {
+      displayName: "Mrs. Pineda",
+      tip: "She comes from the RIGHT. Keep an eye on the right camera and close the right door when she reaches RIGHT DOOR CAM.",
+    },
+    coachStutz: {
+      displayName: "Coach Stutz",
+      tip: "He moves FAST from the LEFT. Check LEFT DOOR CAM often and close the left door quickly — he doesn't wait.",
+    },
+    mrMoody: {
+      displayName: "Mr. Moody",
+      tip: "Mr. Moody is friendly and won't hurt you. If you died, check the other animatronics — they were the real threat.",
+    },
+    coachWolferd: {
+      displayName: "Coach Wolferd",
+      tip: "He is RARE but deadly. When you see the WOLFERD SPAWNED warning, close the right door immediately and wait for him to leave.",
+    },
+  };
 
 export default function App() {
   const {
@@ -13,6 +37,7 @@ export default function App() {
     goToMenu,
     retryNight,
     goToNextNight,
+    resolvePowerMinigame,
   } = useGameEngine();
 
   const [shakeActive, setShakeActive] = useState(false);
@@ -76,16 +101,6 @@ export default function App() {
                 transition={{ delay: 0.2, duration: 0.6 }}
                 className="space-y-2"
               >
-                <div
-                  className="font-display font-black uppercase tracking-widest text-[11px]"
-                  style={{
-                    color: "oklch(0.55 0.22 25)",
-                    letterSpacing: "0.4em",
-                    textShadow: "0 0 10px oklch(0.55 0.22 25 / 0.8)",
-                  }}
-                >
-                  ⚠ WARNING: DISTURBING CONTENT ⚠
-                </div>
                 <h1
                   className="font-display font-black uppercase leading-none title-glitch"
                   style={{
@@ -108,7 +123,7 @@ export default function App() {
                     letterSpacing: "-0.02em",
                   }}
                 >
-                  MISS ROJAS
+                  THE SCHOOL
                 </h1>
                 <p
                   className="font-body text-sm tracking-[0.2em] uppercase"
@@ -263,18 +278,23 @@ export default function App() {
 
             {/* Footer */}
             <div
-              className="absolute bottom-3 text-center text-[10px] font-body tracking-wide"
+              className="absolute bottom-3 text-center text-[10px] font-body tracking-wide space-y-0.5"
               style={{ color: "oklch(0.3 0.04 140)" }}
             >
-              © {new Date().getFullYear()}. Built with love using{" "}
-              <a
-                href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "oklch(0.5 0.1 140)" }}
-              >
-                caffeine.ai
-              </a>
+              <div style={{ color: "oklch(0.28 0.03 140)", fontSize: "9px" }}>
+                formerly 5 Nights at Miss Rojas
+              </div>
+              <div>
+                © {new Date().getFullYear()}. Built with love using{" "}
+                <a
+                  href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: "oklch(0.5 0.1 140)" }}
+                >
+                  caffeine.ai
+                </a>
+              </div>
             </div>
           </motion.div>
         )}
@@ -294,6 +314,7 @@ export default function App() {
               onLeftDoor={toggleLeftDoor}
               onRightDoor={toggleRightDoor}
               onCamera={toggleCamera}
+              onResolvePowerMinigame={resolvePowerMinigame}
             />
           </motion.div>
         )}
@@ -313,7 +334,7 @@ export default function App() {
             }}
           >
             <div className="crt-overlay" />
-            <div className="relative z-10 flex flex-col items-center gap-8 px-6 text-center">
+            <div className="relative z-10 flex flex-col items-center gap-6 px-6 text-center max-w-lg">
               <motion.div
                 initial={{ scale: 0.5, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
@@ -331,23 +352,62 @@ export default function App() {
                 >
                   GAME OVER
                 </h1>
-                <p
-                  className="font-display font-bold uppercase tracking-[0.3em] text-sm mt-2"
+                {state.jumpscareAnm && (
+                  <p
+                    className="font-display font-bold uppercase tracking-[0.2em] text-base mt-2"
+                    style={{
+                      color: "oklch(0.75 0.18 25)",
+                      textShadow: "0 0 15px oklch(0.55 0.22 25 / 0.5)",
+                    }}
+                  >
+                    YOU WERE CAUGHT BY{" "}
+                    <span
+                      style={{
+                        color: "oklch(0.88 0.22 25)",
+                        textShadow: "0 0 20px oklch(0.55 0.22 25)",
+                      }}
+                    >
+                      {KILLER_INFO[state.jumpscareAnm].displayName}
+                    </span>
+                  </p>
+                )}
+              </motion.div>
+
+              {/* Tip box */}
+              {state.jumpscareAnm && (
+                <motion.div
+                  data-ocid="game.death_tip"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.25 }}
+                  className="border rounded-sm px-6 py-4 space-y-2 w-full"
                   style={{
-                    color: "oklch(0.7 0.15 25)",
-                    textShadow: "0 0 15px oklch(0.55 0.22 25 / 0.5)",
+                    borderColor: "oklch(0.45 0.15 25)",
+                    background: "oklch(0.08 0.015 25 / 0.85)",
                   }}
                 >
-                  SHE GOT YOU
-                </p>
-              </motion.div>
+                  <div
+                    className="font-display font-bold text-xs uppercase tracking-widest"
+                    style={{ color: "oklch(0.6 0.15 25)" }}
+                  >
+                    HOW TO AVOID{" "}
+                    {KILLER_INFO[state.jumpscareAnm].displayName.toUpperCase()}
+                  </div>
+                  <p
+                    className="font-body text-sm leading-relaxed"
+                    style={{ color: "oklch(0.75 0.1 25)" }}
+                  >
+                    {KILLER_INFO[state.jumpscareAnm].tip}
+                  </p>
+                </motion.div>
+              )}
 
               {/* Stats */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                className="border rounded-sm px-8 py-4 space-y-2"
+                className="border rounded-sm px-8 py-4 space-y-2 w-full"
                 style={{
                   borderColor: "oklch(0.3 0.1 25)",
                   background: "oklch(0.06 0.01 25 / 0.8)",
