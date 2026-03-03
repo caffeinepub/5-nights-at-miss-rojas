@@ -95,8 +95,11 @@ export interface HighScore {
 }
 export interface backendInterface {
     getHighScore(): Promise<HighScore>;
+    getNightmareScore(): Promise<HighScore>;
     resetHighScore(): Promise<void>;
+    resetNightmareScore(): Promise<void>;
     saveHighScore(bestNight: bigint, bestTime: bigint): Promise<void>;
+    saveNightmareScore(bestNight: bigint, bestTime: bigint): Promise<void>;
 }
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
@@ -114,6 +117,20 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async getNightmareScore(): Promise<HighScore> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getNightmareScore();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getNightmareScore();
+            return result;
+        }
+    }
     async resetHighScore(): Promise<void> {
         if (this.processError) {
             try {
@@ -128,6 +145,20 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async resetNightmareScore(): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.resetNightmareScore();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.resetNightmareScore();
+            return result;
+        }
+    }
     async saveHighScore(arg0: bigint, arg1: bigint): Promise<void> {
         if (this.processError) {
             try {
@@ -139,6 +170,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.saveHighScore(arg0, arg1);
+            return result;
+        }
+    }
+    async saveNightmareScore(arg0: bigint, arg1: bigint): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.saveNightmareScore(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.saveNightmareScore(arg0, arg1);
             return result;
         }
     }

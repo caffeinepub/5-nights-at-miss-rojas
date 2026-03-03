@@ -13,8 +13,11 @@ import type { Principal } from '@icp-sdk/core/principal';
 export interface HighScore { 'bestTime' : bigint, 'bestNight' : bigint }
 export interface _SERVICE {
   'getHighScore' : ActorMethod<[], HighScore>,
+  'getNightmareScore' : ActorMethod<[], HighScore>,
   'resetHighScore' : ActorMethod<[], undefined>,
+  'resetNightmareScore' : ActorMethod<[], undefined>,
   'saveHighScore' : ActorMethod<[bigint, bigint], undefined>,
+  'saveNightmareScore' : ActorMethod<[bigint, bigint], undefined>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

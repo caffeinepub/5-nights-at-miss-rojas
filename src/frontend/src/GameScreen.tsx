@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PowerMinigame from "./components/PowerMinigame";
 import type {
   AnimatronicId,
@@ -69,6 +69,8 @@ export default function GameScreen({
   const imgCacheRef = useRef<Partial<Record<AnimatronicId, HTMLImageElement>>>(
     {},
   );
+  const [glitchActive, setGlitchActive] = useState(false);
+  const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Preload all animatronic images on mount
   useEffect(() => {
@@ -92,6 +94,66 @@ export default function GameScreen({
       playWolferdWarningSound();
     }
   }, [state.wolferdJustSpawned]);
+
+  // Nightmare: frequent screen glitch effect
+  useEffect(() => {
+    if (state.mode !== "nightmare") return;
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const scheduleGlitch = () => {
+      // Glitch every 2-5 seconds — constant psychological pressure
+      const delay = 2000 + Math.random() * 3000;
+      timeoutId = setTimeout(() => {
+        setGlitchActive(true);
+        // Sometimes double-glitch
+        const glitchDuration = Math.random() < 0.4 ? 250 : 120;
+        setTimeout(() => {
+          setGlitchActive(false);
+          if (Math.random() < 0.4) {
+            // Double-glitch
+            setTimeout(() => {
+              setGlitchActive(true);
+              setTimeout(() => {
+                setGlitchActive(false);
+                scheduleGlitch();
+              }, 100);
+            }, 80);
+          } else {
+            scheduleGlitch();
+          }
+        }, glitchDuration);
+      }, delay);
+    };
+    scheduleGlitch();
+    return () => clearTimeout(timeoutId);
+  }, [state.mode]);
+
+  // Nightmare: heartbeat starts at 50% power and speeds up as power drops
+  const heartbeatInterval =
+    state.power < 10 ? 400 : state.power < 25 ? 650 : 1200;
+  const heartbeatActive =
+    state.mode === "nightmare" &&
+    state.power < 50 &&
+    !state.jumpscareVisible &&
+    !state.powerMinigameActive;
+
+  useEffect(() => {
+    if (heartbeatActive) {
+      heartbeatTimerRef.current = setInterval(() => {
+        playHeartbeat();
+      }, heartbeatInterval);
+    } else {
+      if (heartbeatTimerRef.current) {
+        clearInterval(heartbeatTimerRef.current);
+        heartbeatTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (heartbeatTimerRef.current) {
+        clearInterval(heartbeatTimerRef.current);
+        heartbeatTimerRef.current = null;
+      }
+    };
+  }, [heartbeatActive, heartbeatInterval]);
 
   const getTimeString = (seconds: number): string => {
     const hour = Math.floor((seconds / 150) * 6);
@@ -214,18 +276,38 @@ export default function GameScreen({
         ctx.fillRect(10, doorY, doorW, doorH);
       }
 
-      // Check if animatronic at left door
+      // Check if animatronic at left door or left cam (approaching)
       const leftAnm = state.animatronics.find(
-        (a) => a.currentRoom === "LEFT_DOOR" && !a.isWalking && a.active,
+        (a) =>
+          (a.currentRoom === "LEFT_DOOR" || a.currentRoom === "LEFT_CAM") &&
+          !a.isWalking &&
+          a.active &&
+          !a.friendly,
       );
       if (leftAnm && !leftDoorClosed) {
         // Draw eerie eyes in the darkness
+        // Dim if approaching (LEFT_CAM), bright if at door (LEFT_DOOR)
+        const leftAtDoor = leftAnm.currentRoom === "LEFT_DOOR";
         const eyeY = doorY + doorH * 0.35;
         const eyeX1 = 10 + doorW * 0.25;
         const eyeX2 = 10 + doorW * 0.65;
-        const eyeR = 6;
+        const isNightmareEye = state.mode === "nightmare";
+        const eyeR = isNightmareEye
+          ? leftAtDoor
+            ? 10
+            : 7
+          : leftAtDoor
+            ? 6
+            : 4;
 
-        ctx.shadowBlur = 20;
+        ctx.globalAlpha = leftAtDoor ? 1 : 0.45;
+        ctx.shadowBlur = isNightmareEye
+          ? leftAtDoor
+            ? 60
+            : 30
+          : leftAtDoor
+            ? 20
+            : 8;
         ctx.shadowColor = ANIMATRONIC_COLORS[leftAnm.id];
         ctx.fillStyle = ANIMATRONIC_COLORS[leftAnm.id];
         ctx.beginPath();
@@ -234,6 +316,19 @@ export default function GameScreen({
         ctx.beginPath();
         ctx.arc(eyeX2, eyeY, eyeR, 0, Math.PI * 2);
         ctx.fill();
+
+        if (isNightmareEye && leftAtDoor) {
+          // Outer glow ring only when right at the door
+          ctx.shadowBlur = 80;
+          ctx.globalAlpha = 0.35;
+          ctx.beginPath();
+          ctx.arc(eyeX1, eyeY, eyeR + 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(eyeX2, eyeY, eyeR + 8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
         ctx.shadowBlur = 0;
       }
 
@@ -282,16 +377,67 @@ export default function GameScreen({
         ctx.fillRect(rdX, doorY, doorW, doorH);
       }
 
+      // Check if Mr. Moody is chilling at the right door — friendly blue glow
+      const moodyAtDoor = state.animatronics.find(
+        (a) => a.friendly && a.active && a.atDoor && !a.isWalking,
+      );
+      if (moodyAtDoor && !rightDoorClosed) {
+        const moodyEyeY = doorY + doorH * 0.35;
+        const moodyEyeX1 = rdX + doorW * 0.25;
+        const moodyEyeX2 = rdX + doorW * 0.65;
+        ctx.globalAlpha = 0.8;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = "#88aaff";
+        ctx.fillStyle = "#88aaff";
+        ctx.beginPath();
+        ctx.arc(moodyEyeX1, moodyEyeY, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(moodyEyeX2, moodyEyeY, 5, 0, Math.PI * 2);
+        ctx.fill();
+        // Happy smile
+        ctx.globalAlpha = 0.5;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(rdX + doorW * 0.45, moodyEyeY + 18, 12, 0, Math.PI);
+        ctx.strokeStyle = "#88aaff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+      }
+
+      // Check if animatronic at right door or right cam (approaching)
       const rightAnm = state.animatronics.find(
-        (a) => a.currentRoom === "RIGHT_DOOR" && !a.isWalking && a.active,
+        (a) =>
+          (a.currentRoom === "RIGHT_DOOR" || a.currentRoom === "RIGHT_CAM") &&
+          !a.isWalking &&
+          a.active &&
+          !a.friendly,
       );
       if (rightAnm && !rightDoorClosed) {
+        // Dim if approaching (RIGHT_CAM), bright if at door (RIGHT_DOOR)
+        const rightAtDoor = rightAnm.currentRoom === "RIGHT_DOOR";
         const eyeY = doorY + doorH * 0.35;
         const eyeX1 = rdX + doorW * 0.25;
         const eyeX2 = rdX + doorW * 0.65;
-        const eyeR = 6;
+        const isNightmareEyeR = state.mode === "nightmare";
+        const eyeR = isNightmareEyeR
+          ? rightAtDoor
+            ? 10
+            : 7
+          : rightAtDoor
+            ? 6
+            : 4;
 
-        ctx.shadowBlur = 20;
+        ctx.globalAlpha = rightAtDoor ? 1 : 0.45;
+        ctx.shadowBlur = isNightmareEyeR
+          ? rightAtDoor
+            ? 60
+            : 30
+          : rightAtDoor
+            ? 20
+            : 8;
         ctx.shadowColor = ANIMATRONIC_COLORS[rightAnm.id];
         ctx.fillStyle = ANIMATRONIC_COLORS[rightAnm.id];
         ctx.beginPath();
@@ -300,6 +446,18 @@ export default function GameScreen({
         ctx.beginPath();
         ctx.arc(eyeX2, eyeY, eyeR, 0, Math.PI * 2);
         ctx.fill();
+
+        if (isNightmareEyeR && rightAtDoor) {
+          ctx.shadowBlur = 80;
+          ctx.globalAlpha = 0.35;
+          ctx.beginPath();
+          ctx.arc(eyeX1, eyeY, eyeR + 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(eyeX2, eyeY, eyeR + 8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
         ctx.shadowBlur = 0;
       }
 
@@ -671,25 +829,57 @@ export default function GameScreen({
         ctx.fillStyle = "#22aa55";
         ctx.fillText(ROOM_NAMES[cam] ?? cam, cx + 5, cy + 24);
 
+        // Door cams show animatronics that are standing AT the door too
+        const linkedDoorRoom =
+          cam === "LEFT_CAM"
+            ? "LEFT_DOOR"
+            : cam === "RIGHT_CAM"
+              ? "RIGHT_DOOR"
+              : null;
+
         // Find animatronics fully in this room (only active ones)
         const anmsFullyHere = state.animatronics.filter(
-          (a) => a.active && a.currentRoom === cam && !a.isWalking,
+          (a) =>
+            a.active &&
+            !a.isWalking &&
+            (a.currentRoom === cam ||
+              (linkedDoorRoom !== null && a.currentRoom === linkedDoorRoom)),
         );
         // Find animatronics walking OUT from this room (previousRoom)
         const anmsLeaving = state.animatronics.filter(
-          (a) => a.active && a.previousRoom === cam && a.isWalking,
+          (a) =>
+            a.active &&
+            a.isWalking &&
+            (a.previousRoom === cam ||
+              (linkedDoorRoom !== null && a.previousRoom === linkedDoorRoom)),
         );
 
-        // Draw leaving (fading out) animatronics
-        for (const anm of anmsLeaving) {
-          // Opacity fades as they walk away: 1 -> 0 as walkProgress goes 0->1
+        // Only show ONE animatronic per camera cell — prefer fully arrived over leaving,
+        // and among ties pick the one furthest along their path (most dangerous).
+        const pathIndex = (a: {
+          id: string;
+          path: string[];
+          currentRoom: string;
+          previousRoom: string;
+          isWalking: boolean;
+        }) =>
+          a.isWalking
+            ? a.path.indexOf(a.previousRoom)
+            : a.path.indexOf(a.currentRoom);
+
+        if (anmsFullyHere.length > 0) {
+          // Pick the one furthest along their path
+          const anm = anmsFullyHere.reduce((best, a) =>
+            pathIndex(a) >= pathIndex(best) ? a : best,
+          );
+          drawAnimatronicInCell(ctx, anm, cx, cy, cellW, cellH, 1.0);
+        } else if (anmsLeaving.length > 0) {
+          // Pick the one furthest along their path
+          const anm = anmsLeaving.reduce((best, a) =>
+            pathIndex(a) >= pathIndex(best) ? a : best,
+          );
           const opacity = 0.3 + (1 - anm.walkProgress) * 0.7;
           drawAnimatronicInCell(ctx, anm, cx, cy, cellW, cellH, opacity);
-        }
-
-        // Draw fully arrived animatronics
-        for (const anm of anmsFullyHere) {
-          drawAnimatronicInCell(ctx, anm, cx, cy, cellW, cellH, 1.0);
         }
       });
 
@@ -812,7 +1002,14 @@ export default function GameScreen({
   return (
     <div className="relative w-full h-full flex flex-col bg-black select-none">
       {/* Canvas */}
-      <div className="relative flex-1 min-h-0">
+      <div
+        className="relative flex-1 min-h-0"
+        style={{
+          filter: glitchActive
+            ? "hue-rotate(180deg) brightness(1.5) saturate(2)"
+            : undefined,
+        }}
+      >
         <canvas
           ref={canvasRef}
           className="w-full h-full"
@@ -823,8 +1020,45 @@ export default function GameScreen({
         {/* CRT overlay */}
         <div className="crt-overlay" />
 
-        {/* LEFT DOOR DANGER WARNING */}
-        {leftDoorThreat && !state.cameraOpen && (
+        {/* Nightmare: persistent pulsing red vignette */}
+        {state.mode === "nightmare" && (
+          <div
+            className="absolute inset-0 pointer-events-none z-10 animate-pulse"
+            style={{
+              background:
+                "radial-gradient(ellipse at center, transparent 30%, rgba(200,0,0,0.28) 100%)",
+            }}
+          />
+        )}
+
+        {/* Nightmare: extra danger flash when animatronic is at door */}
+        {state.mode === "nightmare" &&
+          !state.cameraOpen &&
+          (state.animatronics.some(
+            (a) =>
+              a.active &&
+              !a.friendly &&
+              a.currentRoom === "LEFT_DOOR" &&
+              !a.isWalking,
+          ) ||
+            state.animatronics.some(
+              (a) =>
+                a.active &&
+                !a.friendly &&
+                a.currentRoom === "RIGHT_DOOR" &&
+                !a.isWalking,
+            )) && (
+            <div
+              className="absolute inset-0 pointer-events-none z-15 animate-ping"
+              style={{
+                background: "rgba(255,0,0,0.12)",
+                border: "6px solid rgba(255,0,0,0.6)",
+              }}
+            />
+          )}
+
+        {/* LEFT DOOR DANGER WARNING — hidden in nightmare mode */}
+        {leftDoorThreat && !state.cameraOpen && state.mode !== "nightmare" && (
           <div
             data-ocid="game.left_door_warning"
             className="absolute left-2 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1 animate-pulse"
@@ -849,8 +1083,8 @@ export default function GameScreen({
           </div>
         )}
 
-        {/* RIGHT DOOR DANGER WARNING */}
-        {rightDoorThreat && !state.cameraOpen && (
+        {/* RIGHT DOOR DANGER WARNING — hidden in nightmare mode */}
+        {rightDoorThreat && !state.cameraOpen && state.mode !== "nightmare" && (
           <div
             data-ocid="game.right_door_warning"
             className="absolute right-2 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1 animate-pulse"
@@ -937,6 +1171,7 @@ export default function GameScreen({
           <PowerMinigame
             onSuccess={() => onResolvePowerMinigame(true)}
             onFailure={() => onResolvePowerMinigame(false)}
+            mode={state.mode}
           />
         )}
 
@@ -960,9 +1195,11 @@ export default function GameScreen({
                 textShadow: "0 0 20px #ff0000, 0 0 40px #ff0000",
               }}
             >
-              {state.jumpscareAnm === "coachWolferd"
-                ? "THE WOLF GOT YOU!"
-                : "SHE GOT YOU!"}
+              {state.mode === "nightmare"
+                ? "THERE IS NO ESCAPE"
+                : state.jumpscareAnm === "coachWolferd"
+                  ? "THE WOLF GOT YOU!"
+                  : "SHE GOT YOU!"}
             </div>
           </div>
         )}
@@ -998,11 +1235,27 @@ export default function GameScreen({
 
         {/* CENTER - Time, Power, Night */}
         <div className="flex-1 flex flex-col justify-between py-0.5">
-          {/* Top row: Night + Time */}
-          <div className="flex justify-between items-center">
+          {/* Top row: Night + Nightmare badge + Time */}
+          <div className="flex justify-between items-center gap-2">
             <div className="font-display font-bold text-green-400 tracking-widest text-sm uppercase">
               NIGHT {state.night}
             </div>
+            {state.mode === "nightmare" && (
+              <div
+                data-ocid="game.nightmare_badge"
+                className="font-display font-black uppercase text-xs tracking-widest px-2 py-0.5 rounded-sm animate-pulse"
+                style={{
+                  color: "#ff3300",
+                  background: "rgba(200,20,0,0.18)",
+                  border: "1px solid #ff3300",
+                  textShadow: "0 0 8px #ff3300, 0 0 16px #ff0000",
+                  boxShadow: "0 0 8px rgba(255,50,0,0.4)",
+                  letterSpacing: "0.12em",
+                }}
+              >
+                💀 NIGHTMARE
+              </div>
+            )}
             <div className="font-display font-bold text-green-300 tracking-widest text-base">
               {timeStr}
             </div>
@@ -1044,7 +1297,15 @@ export default function GameScreen({
                 }}
               >
                 <div
-                  className={`w-1.5 h-1.5 rounded-full ${anm.active && anm.atDoor ? "animate-pulse" : anm.active && anm.isWalking ? "animate-ping" : ""}`}
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    state.mode === "nightmare" && anm.active
+                      ? "animate-ping"
+                      : anm.active && anm.atDoor
+                        ? "animate-pulse"
+                        : anm.active && anm.isWalking
+                          ? "animate-ping"
+                          : ""
+                  }`}
                   style={{
                     backgroundColor: anm.active
                       ? anm.atDoor
@@ -1121,6 +1382,37 @@ export default function GameScreen({
       </div>
     </div>
   );
+}
+
+function playHeartbeat() {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (
+        window as unknown as {
+          webkitAudioContext: typeof AudioContext;
+        }
+      ).webkitAudioContext;
+    const ctx = new AudioCtx();
+    for (let i = 0; i < 2; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(60, ctx.currentTime + i * 0.3);
+      gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.3);
+      gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + i * 0.3 + 0.05);
+      gain.gain.exponentialRampToValueAtTime(
+        0.001,
+        ctx.currentTime + i * 0.3 + 0.25,
+      );
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.3);
+      osc.stop(ctx.currentTime + i * 0.3 + 0.25);
+    }
+  } catch {
+    // Audio not available
+  }
 }
 
 function playWolferdWarningSound() {

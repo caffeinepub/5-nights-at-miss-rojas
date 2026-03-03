@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useActor } from "./useActor";
 
 export type GameScreen = "start" | "game" | "gameover" | "winnight" | "wingame";
+export type GameMode = "normal" | "nightmare";
 
 export type AnimatronicId =
   | "missRojas"
@@ -31,6 +32,7 @@ export interface AnimatronicState {
 export interface GameState {
   screen: GameScreen;
   night: number;
+  mode: GameMode;
   power: number;
   leftDoorClosed: boolean;
   rightDoorClosed: boolean;
@@ -42,24 +44,41 @@ export interface GameState {
   survivedNight: number;
   bestNight: number;
   bestTime: number;
+  nightmareBestNight: number;
+  nightmareBestTime: number;
   loadingScore: boolean;
   powerMinigameActive: boolean; // true when power hits 0 and minigame is running
   wolferdJustSpawned: boolean; // true for ~2.5 seconds after Wolferd spawns
+  godMode: boolean; // admin: animatronics can't kill
+  animatronisFrozen: boolean; // admin: animatronics don't move
+  mrMoodyInRoom: boolean; // true while Mr. Moody is sitting in the player's room
+  mrMoodyAchievement: boolean; // true once the achievement has been earned this session
 }
 
 const NIGHT_DURATION = 150; // seconds (slower)
-const BASE_DRAIN = 0.6; // %/sec (slower)
-const DOOR_DRAIN = 0.4; // % per closed door /sec (slower)
-const CAMERA_DRAIN = 0.3; // %/sec when camera open (slower)
 
-const TICK_INTERVAL = 5000; // ms between AI ticks
+// Normal mode constants
+const NORMAL_BASE_DRAIN = 0.6;
+const NORMAL_DOOR_DRAIN = 0.4;
+const NORMAL_CAMERA_DRAIN = 0.3;
+const NORMAL_TICK_INTERVAL = 5000;
+const NORMAL_WOLFERD_SPAWN_CHANCE = 0.0005;
+const NORMAL_WOLFERD_MAX_TICKS = 3;
+const NORMAL_STUTZ_WALK_SPEED = 1.5;
+const NORMAL_WALK_PROGRESS_DIVISOR = 2.5;
+const NORMAL_WOLFERD_MOVE_MULTIPLIER = 2.0;
 
-// Coach Wolferd: rare spawn chance per tick (3%), active for only ~10-15 ticks before retreating
-const WOLFERD_SPAWN_CHANCE = 0.03;
-const WOLFERD_MAX_TICKS = 3; // auto-retreats after this many ticks at door
-
-// Coach Stutz walks at 1.5x the normal speed (walkProgress advances faster)
-const STUTZ_WALK_SPEED = 1.5;
+// Nightmare mode constants — BRUTALLY hard
+const NIGHTMARE_BASE_DRAIN = 3.5; // Power bleeds out very fast
+const NIGHTMARE_DOOR_DRAIN = 2.0; // Doors cost a TON of power
+const NIGHTMARE_CAMERA_DRAIN = 1.5; // Cameras also expensive
+const NIGHTMARE_TICK_INTERVAL = 900; // AI ticks every 0.9s (insanely fast)
+const NIGHTMARE_WOLFERD_SPAWN_CHANCE = 0.0005; // Extremely rare even in nightmare
+const NIGHTMARE_WOLFERD_MAX_TICKS = 18; // Stays at door a long time
+const NIGHTMARE_STUTZ_WALK_SPEED = 5.0; // Stutz blazes across rooms
+const NIGHTMARE_WALK_PROGRESS_DIVISOR = 0.5; // All animatronics walk extremely fast
+const NIGHTMARE_WOLFERD_MOVE_MULTIPLIER = 99.0; // Wolferd ALWAYS moves — guaranteed every tick
+const NIGHTMARE_WOLFERD_WALK_DIVISOR = 0.3; // Wolferd walks fast but camera gives a tiny warning
 
 const ANIMATRONIC_PATHS: Record<
   AnimatronicId,
@@ -124,8 +143,12 @@ function createInitialAnimatronics(): AnimatronicState[] {
   });
 }
 
-function getMoveChance(night: number): number {
-  // Night 1: 15%, Night 5: 55%
+function getMoveChance(night: number, mode: GameMode): number {
+  if (mode === "nightmare") {
+    // Night 1: 75%, Night 5: 99% — almost always moves every tick
+    return Math.min(0.99, 0.75 + (night - 1) * 0.06);
+  }
+  // Normal — Night 1: 15%, Night 5: 55%
   return 0.15 + (night - 1) * 0.1;
 }
 
@@ -135,6 +158,7 @@ export function useGameEngine() {
   const [state, setState] = useState<GameState>({
     screen: "start",
     night: 1,
+    mode: "normal",
     power: 100,
     leftDoorClosed: false,
     rightDoorClosed: false,
@@ -146,9 +170,15 @@ export function useGameEngine() {
     survivedNight: 0,
     bestNight: 0,
     bestTime: 0,
+    nightmareBestNight: 0,
+    nightmareBestTime: 0,
     loadingScore: true,
     powerMinigameActive: false,
     wolferdJustSpawned: false,
+    godMode: false,
+    animatronisFrozen: false,
+    mrMoodyInRoom: false,
+    mrMoodyAchievement: false,
   });
 
   // Refs for game loop
@@ -169,17 +199,18 @@ export function useGameEngine() {
     stateRef.current = state;
   }, [state]);
 
-  // Load high score when actor is ready
+  // Load high scores when actor is ready
   useEffect(() => {
     if (!actor || isFetching) return;
 
-    actor
-      .getHighScore()
-      .then((hs) => {
+    Promise.all([actor.getHighScore(), actor.getNightmareScore()])
+      .then(([hs, nhs]) => {
         setState((s) => ({
           ...s,
           bestNight: Number(hs.bestNight),
           bestTime: Number(hs.bestTime),
+          nightmareBestNight: Number(nhs.bestNight),
+          nightmareBestTime: Number(nhs.bestTime),
           loadingScore: false,
         }));
       })
@@ -212,25 +243,50 @@ export function useGameEngine() {
 
       playJumpscareSound();
 
-      // Save score
+      // Save score (mode-aware)
       if (actor) {
-        actor.saveHighScore(BigInt(night), BigInt(elapsed)).catch(() => {});
+        const isNm = stateRef.current.mode === "nightmare";
+        if (isNm) {
+          actor
+            .saveNightmareScore(BigInt(night), BigInt(elapsed))
+            .catch(() => {});
+        } else {
+          actor.saveHighScore(BigInt(night), BigInt(elapsed)).catch(() => {});
+        }
       }
 
       jumpscareTimeoutRef.current = setTimeout(() => {
-        setState((s) => ({
-          ...s,
-          jumpscareVisible: false,
-          screen: "gameover",
-          survivedNight: night,
-          bestNight: Math.max(s.bestNight, night),
-          bestTime:
-            night > s.bestNight
-              ? elapsed
-              : s.bestNight === night
-                ? Math.max(s.bestTime, elapsed)
-                : s.bestTime,
-        }));
+        setState((s) => {
+          const isNm = s.mode === "nightmare";
+          if (isNm) {
+            return {
+              ...s,
+              jumpscareVisible: false,
+              screen: "gameover",
+              survivedNight: night,
+              nightmareBestNight: Math.max(s.nightmareBestNight, night),
+              nightmareBestTime:
+                night > s.nightmareBestNight
+                  ? elapsed
+                  : s.nightmareBestNight === night
+                    ? Math.max(s.nightmareBestTime, elapsed)
+                    : s.nightmareBestTime,
+            };
+          }
+          return {
+            ...s,
+            jumpscareVisible: false,
+            screen: "gameover",
+            survivedNight: night,
+            bestNight: Math.max(s.bestNight, night),
+            bestTime:
+              night > s.bestNight
+                ? elapsed
+                : s.bestNight === night
+                  ? Math.max(s.bestTime, elapsed)
+                  : s.bestTime,
+          };
+        });
       }, 1500);
     },
     [actor],
@@ -251,11 +307,37 @@ export function useGameEngine() {
         wolferdSpawnTimerRef.current > 0 &&
         Date.now() - wolferdSpawnTimerRef.current < 2500;
 
+      // Mode-aware constants
+      const isNightmare = s.mode === "nightmare";
+      const baseDrain = isNightmare ? NIGHTMARE_BASE_DRAIN : NORMAL_BASE_DRAIN;
+      const doorDrain = isNightmare ? NIGHTMARE_DOOR_DRAIN : NORMAL_DOOR_DRAIN;
+      const cameraDrain = isNightmare
+        ? NIGHTMARE_CAMERA_DRAIN
+        : NORMAL_CAMERA_DRAIN;
+      const tickInterval = isNightmare
+        ? NIGHTMARE_TICK_INTERVAL
+        : NORMAL_TICK_INTERVAL;
+      const wolferdSpawnChance = isNightmare
+        ? NIGHTMARE_WOLFERD_SPAWN_CHANCE
+        : NORMAL_WOLFERD_SPAWN_CHANCE;
+      const wolferdMaxTicks = isNightmare
+        ? NIGHTMARE_WOLFERD_MAX_TICKS
+        : NORMAL_WOLFERD_MAX_TICKS;
+      const stutzWalkSpeed = isNightmare
+        ? NIGHTMARE_STUTZ_WALK_SPEED
+        : NORMAL_STUTZ_WALK_SPEED;
+      const walkProgressDivisor = isNightmare
+        ? NIGHTMARE_WALK_PROGRESS_DIVISOR
+        : NORMAL_WALK_PROGRESS_DIVISOR;
+      const wolferdMoveMultiplier = isNightmare
+        ? NIGHTMARE_WOLFERD_MOVE_MULTIPLIER
+        : NORMAL_WOLFERD_MOVE_MULTIPLIER;
+
       // Power drain
-      let drainRate = BASE_DRAIN;
-      if (s.leftDoorClosed) drainRate += DOOR_DRAIN;
-      if (s.rightDoorClosed) drainRate += DOOR_DRAIN;
-      if (s.cameraOpen) drainRate += CAMERA_DRAIN;
+      let drainRate = baseDrain;
+      if (s.leftDoorClosed) drainRate += doorDrain;
+      if (s.rightDoorClosed) drainRate += doorDrain;
+      if (s.cameraOpen) drainRate += cameraDrain;
 
       const newPower = Math.max(0, s.power - drainRate * dtSec);
       const newTime = Math.min(NIGHT_DURATION, elapsed);
@@ -267,19 +349,47 @@ export function useGameEngine() {
           cancelAnimationFrame(animFrameRef.current);
           animFrameRef.current = null;
         }
+        const isNm = s.mode === "nightmare";
         if (actor) {
-          actor
-            .saveHighScore(BigInt(s.night + 1), BigInt(NIGHT_DURATION))
-            .catch(() => {});
+          if (isNm) {
+            actor
+              .saveNightmareScore(
+                BigInt(s.night + 1 <= 5 ? s.night + 1 : 5),
+                BigInt(NIGHT_DURATION),
+              )
+              .catch(() => {});
+          } else {
+            actor
+              .saveHighScore(
+                BigInt(s.night + 1 <= 5 ? s.night + 1 : 5),
+                BigInt(NIGHT_DURATION),
+              )
+              .catch(() => {});
+          }
         }
-        setState((prev) => ({
-          ...prev,
-          time: NIGHT_DURATION,
-          power: newPower,
-          screen: s.night >= 5 ? "wingame" : "winnight",
-          survivedNight: s.night,
-          bestNight: Math.max(prev.bestNight, s.night + 1),
-        }));
+        setState((prev) => {
+          if (isNm) {
+            return {
+              ...prev,
+              time: NIGHT_DURATION,
+              power: newPower,
+              screen: s.night >= 5 ? "wingame" : "winnight",
+              survivedNight: s.night,
+              nightmareBestNight: Math.max(
+                prev.nightmareBestNight,
+                s.night + 1,
+              ),
+            };
+          }
+          return {
+            ...prev,
+            time: NIGHT_DURATION,
+            power: newPower,
+            screen: s.night >= 5 ? "wingame" : "winnight",
+            survivedNight: s.night,
+            bestNight: Math.max(prev.bestNight, s.night + 1),
+          };
+        });
         return;
       }
 
@@ -301,39 +411,44 @@ export function useGameEngine() {
         return;
       }
 
-      // Update walking progress for all animatronics
-      let newAnimatronics = s.animatronics.map((anm) => {
-        if (!anm.isWalking) return anm;
-        // Coach Stutz walks faster
-        const speed = anm.id === "coachStutz" ? STUTZ_WALK_SPEED : 1.0;
-        const newProgress = Math.min(
-          1,
-          anm.walkProgress + (dtSec / 2.5) * speed,
-        );
-        const doneWalking = newProgress >= 1;
-        return {
-          ...anm,
-          walkProgress: newProgress,
-          isWalking: !doneWalking,
-        };
-      });
+      // Update walking progress for all animatronics (skip if frozen)
+      let newAnimatronics = s.animatronisFrozen
+        ? s.animatronics
+        : s.animatronics.map((anm) => {
+            if (!anm.isWalking) return anm;
+            // Coach Stutz walks faster; Wolferd in nightmare teleports almost instantly
+            let divisor = walkProgressDivisor;
+            if (anm.id === "coachStutz") {
+              divisor = walkProgressDivisor / stutzWalkSpeed;
+            } else if (anm.id === "coachWolferd" && isNightmare) {
+              divisor = NIGHTMARE_WOLFERD_WALK_DIVISOR;
+            }
+            const newProgress = Math.min(1, anm.walkProgress + dtSec / divisor);
+            const doneWalking = newProgress >= 1;
+            return {
+              ...anm,
+              walkProgress: newProgress,
+              isWalking: !doneWalking,
+            };
+          });
 
-      // AI ticks
+      // AI ticks (skip if frozen)
       const aiDt = timestamp - lastAiTickRef.current;
       let gameOver = false;
       let killerAnm: AnimatronicId | null = null;
       let wolferdJustSpawnedThisTick = false;
+      let mrMoodyJustEntered = false;
 
-      if (aiDt >= TICK_INTERVAL) {
+      if (!s.animatronisFrozen && aiDt >= tickInterval) {
         lastAiTickRef.current = timestamp;
-        const moveChance = getMoveChance(s.night);
+        const moveChance = getMoveChance(s.night, s.mode);
 
         newAnimatronics = newAnimatronics.map((anm) => {
           const updated = { ...anm };
 
           // Try to spawn Coach Wolferd if inactive
           if (updated.rareSpawn && !updated.active) {
-            if (Math.random() < WOLFERD_SPAWN_CHANCE) {
+            if (Math.random() < wolferdSpawnChance) {
               updated.active = true;
               updated.currentRoom = updated.path[0];
               updated.previousRoom = updated.path[0];
@@ -355,10 +470,14 @@ export function useGameEngine() {
             const doorClosed =
               updated.side === "left" ? s.leftDoorClosed : s.rightDoorClosed;
 
-            // Rare animatronics (Wolferd) auto-retreat quickly
+            // Rare animatronics (Wolferd) auto-retreat
             if (updated.rareSpawn) {
               updated.rareTimer += 1;
-              if (updated.rareTimer >= WOLFERD_MAX_TICKS || doorClosed) {
+              // In nightmare: door doesn't make him retreat — only time does
+              const shouldRetreat = isNightmare
+                ? updated.rareTimer >= wolferdMaxTicks
+                : updated.rareTimer >= wolferdMaxTicks || doorClosed;
+              if (shouldRetreat) {
                 // Retreat and go inactive
                 updated.currentRoom = updated.path[0];
                 updated.previousRoom = updated.path[updated.path.length - 1];
@@ -374,17 +493,8 @@ export function useGameEngine() {
             }
 
             if (!doorClosed) {
-              // Friendly animatronics retreat instead of killing
-              if (updated.friendly) {
-                updated.currentRoom = updated.path[0];
-                updated.previousRoom = updated.path[updated.path.length - 1];
-                updated.walkProgress = 0;
-                updated.isWalking = true;
-                updated.atDoor = false;
-                updated.retreatTimer = 0;
-                return updated;
-              }
-              // Door is open but we only kill on arrival (handled in collision check below)
+              // Friendly animatronics (Mr. Moody) enter the room — handled in collision check below
+              // Door is open but we only kill/enter on arrival (handled in collision check below)
               return updated;
             }
 
@@ -409,7 +519,7 @@ export function useGameEngine() {
             effectiveMoveChance = moveChance * 1.5;
           } else if (updated.rareSpawn) {
             // Wolferd moves fast when active
-            effectiveMoveChance = moveChance * 2.0;
+            effectiveMoveChance = moveChance * wolferdMoveMultiplier;
           }
 
           if (Math.random() < effectiveMoveChance) {
@@ -436,18 +546,54 @@ export function useGameEngine() {
           const anm = newAnimatronics[i];
           const prev = s.animatronics[i];
           if (!anm.active) continue;
-          if (anm.friendly) continue;
           // Only trigger when they just finished walking INTO a door room
           const justArrived = prev.isWalking && !anm.isWalking && anm.atDoor;
           if (!justArrived) continue;
           const doorClosed =
             anm.side === "left" ? s.leftDoorClosed : s.rightDoorClosed;
-          if (!doorClosed) {
+          if (anm.friendly) {
+            // Mr. Moody enters the room — achievement!
+            if (!doorClosed) {
+              mrMoodyJustEntered = true;
+            }
+            continue;
+          }
+          if (!doorClosed && !s.godMode) {
             gameOver = true;
             killerAnm = anm.id;
           }
         }
+
+        // Handle Mr. Moody sitting in room: after ~15 ticks he leaves
+        for (let i = 0; i < newAnimatronics.length; i++) {
+          const anm = newAnimatronics[i];
+          if (!anm.friendly || !anm.active || !anm.atDoor) continue;
+          if (!anm.isWalking) {
+            // He's sitting — count retreat timer, eventually leave
+            if (anm.retreatTimer >= 15) {
+              newAnimatronics[i] = {
+                ...anm,
+                currentRoom: anm.path[0],
+                previousRoom: anm.path[anm.path.length - 1],
+                walkProgress: 0,
+                isWalking: true,
+                atDoor: false,
+                retreatTimer: 0,
+              };
+            } else {
+              newAnimatronics[i] = {
+                ...anm,
+                retreatTimer: anm.retreatTimer + 1,
+              };
+            }
+          }
+        }
       }
+
+      // Compute whether Mr. Moody is currently sitting in the room
+      const mrMoodyNowInRoom = newAnimatronics.some(
+        (a) => a.friendly && a.active && a.atDoor && !a.isWalking,
+      );
 
       if (gameOver && killerAnm) {
         setState((prev) => ({
@@ -457,6 +603,7 @@ export function useGameEngine() {
           time: newTime,
           wolferdJustSpawned:
             wolferdSpawnedRecently || wolferdJustSpawnedThisTick,
+          mrMoodyInRoom: mrMoodyNowInRoom,
         }));
         triggerJumpscare(killerAnm, s.night, Math.floor(elapsed));
         return;
@@ -469,6 +616,9 @@ export function useGameEngine() {
         animatronics: newAnimatronics,
         wolferdJustSpawned:
           wolferdSpawnedRecently || wolferdJustSpawnedThisTick,
+        mrMoodyInRoom: mrMoodyNowInRoom,
+        mrMoodyAchievement:
+          prev.mrMoodyAchievement || mrMoodyJustEntered || mrMoodyNowInRoom,
       }));
 
       animFrameRef.current = requestAnimationFrame(runGameLoop);
@@ -477,7 +627,7 @@ export function useGameEngine() {
   );
 
   const startGame = useCallback(
-    (night: number) => {
+    (night: number, mode: GameMode = "normal") => {
       if (jumpscareTimeoutRef.current) {
         clearTimeout(jumpscareTimeoutRef.current);
       }
@@ -495,6 +645,7 @@ export function useGameEngine() {
         ...prev,
         screen: "game",
         night,
+        mode,
         power: 100,
         leftDoorClosed: false,
         rightDoorClosed: false,
@@ -506,6 +657,10 @@ export function useGameEngine() {
         survivedNight: 0,
         powerMinigameActive: false,
         wolferdJustSpawned: false,
+        godMode: false,
+        animatronisFrozen: false,
+        mrMoodyInRoom: false,
+        mrMoodyAchievement: false,
       }));
 
       requestAnimationFrame((ts) => {
@@ -570,12 +725,99 @@ export function useGameEngine() {
   }, []);
 
   const retryNight = useCallback(() => {
-    startGame(stateRef.current.survivedNight || 1);
+    startGame(stateRef.current.survivedNight || 1, stateRef.current.mode);
   }, [startGame]);
 
   const goToNextNight = useCallback(() => {
-    startGame(stateRef.current.survivedNight + 1);
+    startGame(stateRef.current.survivedNight + 1, stateRef.current.mode);
   }, [startGame]);
+
+  // ── Admin functions ──────────────────────────────────────────────────────
+
+  const adminAutoWin = useCallback(() => {
+    const s = stateRef.current;
+    if (s.screen !== "game") return;
+    gameActiveRef.current = false;
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    const isNm = s.mode === "nightmare";
+    setState((prev) => {
+      if (isNm) {
+        return {
+          ...prev,
+          screen: prev.night >= 5 ? "wingame" : "winnight",
+          survivedNight: prev.night,
+          nightmareBestNight: Math.max(prev.nightmareBestNight, prev.night + 1),
+        };
+      }
+      return {
+        ...prev,
+        screen: prev.night >= 5 ? "wingame" : "winnight",
+        survivedNight: prev.night,
+        bestNight: Math.max(prev.bestNight, prev.night + 1),
+      };
+    });
+  }, []);
+
+  const adminWinAll = useCallback(() => {
+    gameActiveRef.current = false;
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    const isNm = stateRef.current.mode === "nightmare";
+    setState((prev) => {
+      if (isNm) {
+        return {
+          ...prev,
+          screen: "wingame",
+          survivedNight: 5,
+          nightmareBestNight: Math.max(prev.nightmareBestNight, 6),
+        };
+      }
+      return {
+        ...prev,
+        screen: "wingame",
+        survivedNight: 5,
+        bestNight: Math.max(prev.bestNight, 6),
+      };
+    });
+  }, []);
+
+  const adminKillAll = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      animatronics: prev.animatronics.map((a) => ({
+        ...a,
+        active: false,
+        atDoor: false,
+      })),
+    }));
+  }, []);
+
+  const adminMaxPower = useCallback(() => {
+    setState((prev) => ({ ...prev, power: 100 }));
+  }, []);
+
+  const adminToggleFreeze = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      animatronisFrozen: !prev.animatronisFrozen,
+    }));
+  }, []);
+
+  const adminUnlockNights = useCallback(() => {
+    setState((prev) => ({ ...prev, bestNight: Math.max(prev.bestNight, 5) }));
+  }, []);
+
+  const adminToggleGodMode = useCallback(() => {
+    setState((prev) => ({ ...prev, godMode: !prev.godMode }));
+  }, []);
+
+  const adminSkipToNight = useCallback(
+    (night: number) => {
+      startGame(night, stateRef.current.mode);
+    },
+    [startGame],
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Cleanup on unmount
   useEffect(() => {
@@ -597,6 +839,14 @@ export function useGameEngine() {
     retryNight,
     goToNextNight,
     resolvePowerMinigame,
+    adminAutoWin,
+    adminWinAll,
+    adminKillAll,
+    adminMaxPower,
+    adminToggleFreeze,
+    adminUnlockNights,
+    adminToggleGodMode,
+    adminSkipToNight,
   };
 }
 

@@ -13,6 +13,9 @@ export interface HighScore {
 }
 export interface backendInterface {
     getHighScore(): Promise<HighScore>;
+    getNightmareScore(): Promise<HighScore>;
     resetHighScore(): Promise<void>;
+    resetNightmareScore(): Promise<void>;
     saveHighScore(bestNight: bigint, bestTime: bigint): Promise<void>;
+    saveNightmareScore(bestNight: bigint, bestTime: bigint): Promise<void>;
 }

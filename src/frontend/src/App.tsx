@@ -1,7 +1,11 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import GameScreen from "./GameScreen";
-import { type AnimatronicId, useGameEngine } from "./hooks/useGameEngine";
+import {
+  type AnimatronicId,
+  type GameMode,
+  useGameEngine,
+} from "./hooks/useGameEngine";
 
 const KILLER_INFO: Record<AnimatronicId, { displayName: string; tip: string }> =
   {
@@ -38,9 +42,20 @@ export default function App() {
     retryNight,
     goToNextNight,
     resolvePowerMinigame,
+    adminAutoWin,
+    adminWinAll,
+    adminKillAll,
+    adminMaxPower,
+    adminToggleFreeze,
+    adminUnlockNights,
+    adminToggleGodMode,
+    adminSkipToNight,
   } = useGameEngine();
 
   const [shakeActive, setShakeActive] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<GameMode>("normal");
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [showMoodyAchievement, setShowMoodyAchievement] = useState(false);
 
   // Trigger shake on jumpscare
   useEffect(() => {
@@ -50,6 +65,30 @@ export default function App() {
       return () => clearTimeout(t);
     }
   }, [state.jumpscareVisible]);
+
+  // Show Mr. Moody achievement popup when first earned
+  useEffect(() => {
+    if (state.mrMoodyAchievement && !showMoodyAchievement) {
+      setShowMoodyAchievement(true);
+      const t = setTimeout(() => setShowMoodyAchievement(false), 5000);
+      return () => clearTimeout(t);
+    }
+  }, [state.mrMoodyAchievement, showMoodyAchievement]);
+
+  // Cheat code listener: type "ezgg" anywhere to open admin panel
+  useEffect(() => {
+    let buffer = "";
+    const handleKey = (e: KeyboardEvent) => {
+      buffer += e.key.toLowerCase();
+      if (buffer.length > 4) buffer = buffer.slice(-4);
+      if (buffer === "ezgg") {
+        setAdminPanelOpen(true);
+        buffer = "";
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
 
   const maxUnlockedNight = Math.min(5, state.bestNight + 1);
 
@@ -73,10 +112,12 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4 }}
-            className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden"
+            className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden transition-all duration-700"
             style={{
               background:
-                "radial-gradient(ellipse at center top, #0a1a0d 0%, #020604 60%, #010302 100%)",
+                selectedMode === "nightmare"
+                  ? "radial-gradient(ellipse at center top, #1a0505 0%, #0a0101 60%, #050000 100%)"
+                  : "radial-gradient(ellipse at center top, #0a1a0d 0%, #020604 60%, #010302 100%)",
             }}
           >
             {/* Scanlines */}
@@ -84,10 +125,12 @@ export default function App() {
 
             {/* Animated background grid */}
             <div
-              className="absolute inset-0 opacity-5"
+              className="absolute inset-0 opacity-5 transition-all duration-700"
               style={{
                 backgroundImage:
-                  "linear-gradient(oklch(0.65 0.18 140) 1px, transparent 1px), linear-gradient(90deg, oklch(0.65 0.18 140) 1px, transparent 1px)",
+                  selectedMode === "nightmare"
+                    ? "linear-gradient(oklch(0.55 0.22 25) 1px, transparent 1px), linear-gradient(90deg, oklch(0.55 0.22 25) 1px, transparent 1px)"
+                    : "linear-gradient(oklch(0.65 0.18 140) 1px, transparent 1px), linear-gradient(90deg, oklch(0.65 0.18 140) 1px, transparent 1px)",
                 backgroundSize: "40px 40px",
               }}
             />
@@ -133,7 +176,7 @@ export default function App() {
                 </p>
               </motion.div>
 
-              {/* High Score */}
+              {/* High Scores */}
               {state.loadingScore ? (
                 <motion.div
                   data-ocid="game.loading_state"
@@ -149,40 +192,224 @@ export default function App() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.4 }}
-                  className="border rounded-sm px-6 py-3 space-y-1"
-                  style={{
-                    borderColor: "oklch(0.25 0.05 140)",
-                    background: "oklch(0.08 0.015 145 / 0.8)",
-                  }}
+                  className="flex gap-3 w-full"
                 >
+                  {/* Normal Score */}
                   <div
-                    className="font-display font-bold text-xs uppercase tracking-widest"
-                    style={{ color: "oklch(0.5 0.06 140)" }}
+                    className="flex-1 border rounded-sm px-4 py-3 space-y-1"
+                    style={{
+                      borderColor: "oklch(0.25 0.05 140)",
+                      background: "oklch(0.08 0.015 145 / 0.8)",
+                    }}
                   >
-                    HIGH SCORE
+                    <div
+                      className="font-display font-bold text-xs uppercase tracking-widest"
+                      style={{ color: "oklch(0.5 0.06 140)" }}
+                    >
+                      🟢 NORMAL BEST
+                    </div>
+                    <div
+                      className="font-body text-sm"
+                      style={{ color: "oklch(0.7 0.15 140)" }}
+                    >
+                      Night:{" "}
+                      <span
+                        className="font-bold"
+                        style={{ color: "oklch(0.65 0.18 140)" }}
+                      >
+                        {state.bestNight > 0 ? `${state.bestNight}` : "—"}
+                      </span>
+                    </div>
+                    <div
+                      className="font-body text-xs"
+                      style={{ color: "oklch(0.55 0.1 140)" }}
+                    >
+                      Time:{" "}
+                      <span className="font-bold">
+                        {state.bestTime > 0 ? formatTime(state.bestTime) : "—"}
+                      </span>
+                    </div>
                   </div>
+
+                  {/* Nightmare Score */}
                   <div
-                    className="font-body text-sm"
-                    style={{ color: "oklch(0.7 0.15 140)" }}
+                    className="flex-1 border rounded-sm px-4 py-3 space-y-1"
+                    style={{
+                      borderColor: "oklch(0.3 0.12 25)",
+                      background: "oklch(0.07 0.015 25 / 0.8)",
+                    }}
                   >
-                    Best Night:{" "}
-                    <span
-                      className="font-bold"
-                      style={{ color: "oklch(0.65 0.18 140)" }}
+                    <div
+                      className="font-display font-bold text-xs uppercase tracking-widest"
+                      style={{ color: "oklch(0.55 0.18 25)" }}
                     >
-                      {state.bestNight > 0 ? `Night ${state.bestNight}` : "—"}
-                    </span>
-                    {" · "}
-                    Best Time:{" "}
-                    <span
-                      className="font-bold"
-                      style={{ color: "oklch(0.65 0.18 140)" }}
+                      💀 NIGHTMARE BEST
+                    </div>
+                    <div
+                      className="font-body text-sm"
+                      style={{ color: "oklch(0.7 0.15 25)" }}
                     >
-                      {state.bestTime > 0 ? formatTime(state.bestTime) : "—"}
-                    </span>
+                      Night:{" "}
+                      <span
+                        className="font-bold"
+                        style={{ color: "oklch(0.65 0.2 25)" }}
+                      >
+                        {state.nightmareBestNight > 0
+                          ? `${state.nightmareBestNight}`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div
+                      className="font-body text-xs"
+                      style={{ color: "oklch(0.5 0.12 25)" }}
+                    >
+                      Time:{" "}
+                      <span className="font-bold">
+                        {state.nightmareBestTime > 0
+                          ? formatTime(state.nightmareBestTime)
+                          : "—"}
+                      </span>
+                    </div>
                   </div>
                 </motion.div>
               )}
+
+              {/* Mode Picker */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.45 }}
+                className="space-y-3 w-full"
+              >
+                <div
+                  className="font-display font-bold text-xs uppercase tracking-widest text-center"
+                  style={{
+                    color:
+                      selectedMode === "nightmare"
+                        ? "oklch(0.55 0.2 25)"
+                        : "oklch(0.5 0.06 140)",
+                  }}
+                >
+                  Select Difficulty
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {/* NORMAL */}
+                  <button
+                    type="button"
+                    data-ocid="game.normal_mode_button"
+                    onClick={() => setSelectedMode("normal")}
+                    className="flex flex-col items-center gap-2 px-4 py-4 rounded-sm border-2 transition-all duration-300 cursor-pointer"
+                    style={
+                      selectedMode === "normal"
+                        ? {
+                            borderColor: "oklch(0.65 0.18 140)",
+                            background: "oklch(0.1 0.025 140 / 0.9)",
+                            boxShadow:
+                              "0 0 18px oklch(0.65 0.18 140 / 0.4), inset 0 0 12px oklch(0.65 0.18 140 / 0.05)",
+                            color: "oklch(0.88 0.08 140)",
+                          }
+                        : {
+                            borderColor: "oklch(0.22 0.04 140)",
+                            background: "oklch(0.06 0.01 140 / 0.6)",
+                            color: "oklch(0.45 0.07 140)",
+                          }
+                    }
+                  >
+                    <span className="text-2xl">🟢</span>
+                    <div
+                      className="font-display font-black uppercase tracking-widest text-sm"
+                      style={{
+                        color:
+                          selectedMode === "normal"
+                            ? "oklch(0.75 0.18 140)"
+                            : "inherit",
+                        textShadow:
+                          selectedMode === "normal"
+                            ? "0 0 10px oklch(0.65 0.18 140 / 0.6)"
+                            : "none",
+                      }}
+                    >
+                      NORMAL
+                    </div>
+                    <div
+                      className="font-body text-xs text-center"
+                      style={{ opacity: 0.8 }}
+                    >
+                      Classic difficulty
+                    </div>
+                    {selectedMode === "normal" && (
+                      <div
+                        className="text-[10px] font-display font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
+                        style={{
+                          background: "oklch(0.65 0.18 140 / 0.2)",
+                          color: "oklch(0.75 0.18 140)",
+                          border: "1px solid oklch(0.65 0.18 140 / 0.4)",
+                        }}
+                      >
+                        ✓ SELECTED
+                      </div>
+                    )}
+                  </button>
+
+                  {/* NIGHTMARE */}
+                  <button
+                    type="button"
+                    data-ocid="game.nightmare_mode_button"
+                    onClick={() => setSelectedMode("nightmare")}
+                    className="flex flex-col items-center gap-2 px-4 py-4 rounded-sm border-2 transition-all duration-300 cursor-pointer"
+                    style={
+                      selectedMode === "nightmare"
+                        ? {
+                            borderColor: "oklch(0.55 0.22 25)",
+                            background: "oklch(0.08 0.02 25 / 0.9)",
+                            boxShadow:
+                              "0 0 18px oklch(0.55 0.22 25 / 0.5), inset 0 0 12px oklch(0.55 0.22 25 / 0.08)",
+                            color: "oklch(0.75 0.2 25)",
+                          }
+                        : {
+                            borderColor: "oklch(0.22 0.06 25)",
+                            background: "oklch(0.06 0.01 25 / 0.6)",
+                            color: "oklch(0.45 0.1 25)",
+                          }
+                    }
+                  >
+                    <span className="text-2xl">💀</span>
+                    <div
+                      className="font-display font-black uppercase tracking-widest text-sm"
+                      style={{
+                        color:
+                          selectedMode === "nightmare"
+                            ? "oklch(0.7 0.22 25)"
+                            : "inherit",
+                        textShadow:
+                          selectedMode === "nightmare"
+                            ? "0 0 10px oklch(0.55 0.22 25 / 0.8)"
+                            : "none",
+                      }}
+                    >
+                      NIGHTMARE
+                    </div>
+                    <div
+                      className="font-body text-xs text-center"
+                      style={{ opacity: 0.8 }}
+                    >
+                      Nearly impossible. You will die.
+                    </div>
+                    {selectedMode === "nightmare" && (
+                      <div
+                        className="text-[10px] font-display font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
+                        style={{
+                          background: "oklch(0.55 0.22 25 / 0.2)",
+                          color: "oklch(0.7 0.22 25)",
+                          border: "1px solid oklch(0.55 0.22 25 / 0.5)",
+                        }}
+                      >
+                        ☠ SELECTED
+                      </div>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
 
               {/* Night selection */}
               <motion.div
@@ -193,7 +420,12 @@ export default function App() {
               >
                 <div
                   className="font-display font-bold text-xs uppercase tracking-widest"
-                  style={{ color: "oklch(0.5 0.06 140)" }}
+                  style={{
+                    color:
+                      selectedMode === "nightmare"
+                        ? "oklch(0.5 0.12 25)"
+                        : "oklch(0.5 0.06 140)",
+                  }}
                 >
                   Select Night
                 </div>
@@ -205,7 +437,9 @@ export default function App() {
                         key={night}
                         type="button"
                         data-ocid={`game.night_select.button.${night}`}
-                        onClick={() => unlocked && startGame(night)}
+                        onClick={() =>
+                          unlocked && startGame(night, selectedMode)
+                        }
                         disabled={!unlocked}
                         className={`
                           w-14 h-14 font-display font-black text-xl
@@ -218,13 +452,21 @@ export default function App() {
                         `}
                         style={
                           unlocked
-                            ? {
-                                borderColor: "oklch(0.65 0.18 140)",
-                                color: "oklch(0.88 0.08 140)",
-                                background: "oklch(0.1 0.02 145)",
-                                boxShadow:
-                                  "0 0 12px oklch(0.65 0.18 140 / 0.3)",
-                              }
+                            ? selectedMode === "nightmare"
+                              ? {
+                                  borderColor: "oklch(0.55 0.22 25)",
+                                  color: "oklch(0.88 0.08 25)",
+                                  background: "oklch(0.1 0.02 25)",
+                                  boxShadow:
+                                    "0 0 12px oklch(0.55 0.22 25 / 0.4)",
+                                }
+                              : {
+                                  borderColor: "oklch(0.65 0.18 140)",
+                                  color: "oklch(0.88 0.08 140)",
+                                  background: "oklch(0.1 0.02 145)",
+                                  boxShadow:
+                                    "0 0 12px oklch(0.65 0.18 140 / 0.3)",
+                                }
                             : {
                                 borderColor: "oklch(0.2 0.02 145)",
                                 color: "oklch(0.3 0.02 145)",
@@ -247,17 +489,29 @@ export default function App() {
                 transition={{ delay: 0.6 }}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => startGame(1)}
-                className="font-display font-black uppercase tracking-widest px-12 py-4 text-lg rounded-sm border-2 transition-all duration-200"
-                style={{
-                  borderColor: "oklch(0.65 0.18 140)",
-                  color: "oklch(0.08 0.015 145)",
-                  background: "oklch(0.65 0.18 140)",
-                  boxShadow:
-                    "0 0 20px oklch(0.65 0.18 140 / 0.5), 0 0 50px oklch(0.65 0.18 140 / 0.2)",
-                }}
+                onClick={() => startGame(1, selectedMode)}
+                className="font-display font-black uppercase tracking-widest px-12 py-4 text-lg rounded-sm border-2 transition-all duration-300"
+                style={
+                  selectedMode === "nightmare"
+                    ? {
+                        borderColor: "oklch(0.55 0.22 25)",
+                        color: "oklch(0.97 0.01 25)",
+                        background: "oklch(0.45 0.22 25)",
+                        boxShadow:
+                          "0 0 25px oklch(0.55 0.22 25 / 0.7), 0 0 60px oklch(0.55 0.22 25 / 0.3)",
+                      }
+                    : {
+                        borderColor: "oklch(0.65 0.18 140)",
+                        color: "oklch(0.08 0.015 145)",
+                        background: "oklch(0.65 0.18 140)",
+                        boxShadow:
+                          "0 0 20px oklch(0.65 0.18 140 / 0.5), 0 0 50px oklch(0.65 0.18 140 / 0.2)",
+                      }
+                }
               >
-                START NIGHT 1
+                {selectedMode === "nightmare"
+                  ? "☠ START NIGHTMARE"
+                  : "START NIGHT 1"}
               </motion.button>
 
               {/* How to play */}
@@ -442,12 +696,21 @@ export default function App() {
                     </span>
                   </p>
                   <p>
-                    Best Night:{" "}
+                    {state.mode === "nightmare"
+                      ? "💀 Nightmare Best"
+                      : "🟢 Normal Best"}
+                    :{" "}
                     <span
                       className="font-bold"
                       style={{ color: "oklch(0.7 0.15 25)" }}
                     >
-                      {state.bestNight > 0 ? `Night ${state.bestNight}` : "—"}
+                      {state.mode === "nightmare"
+                        ? state.nightmareBestNight > 0
+                          ? `Night ${state.nightmareBestNight}`
+                          : "—"
+                        : state.bestNight > 0
+                          ? `Night ${state.bestNight}`
+                          : "—"}
                     </span>
                   </p>
                 </div>
@@ -705,11 +968,26 @@ export default function App() {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.5 }}
                 className="font-body text-sm tracking-wide"
-                style={{ color: "oklch(0.6 0.1 140)" }}
+                style={{
+                  color:
+                    state.mode === "nightmare"
+                      ? "oklch(0.65 0.15 25)"
+                      : "oklch(0.6 0.1 140)",
+                }}
               >
-                Miss Rojas has been defeated... for now.
-                <br />
-                The school is safe once again.
+                {state.mode === "nightmare" ? (
+                  <>
+                    You survived the NIGHTMARE.
+                    <br />
+                    You are absolutely insane.
+                  </>
+                ) : (
+                  <>
+                    Miss Rojas has been defeated... for now.
+                    <br />
+                    The school is safe once again.
+                  </>
+                )}
               </motion.p>
 
               <motion.button
@@ -742,6 +1020,239 @@ export default function App() {
           className="fixed inset-0 z-50 pointer-events-none red-flash"
           style={{ background: "oklch(0.4 0.22 25 / 0.6)" }}
         />
+      )}
+
+      {/* Mr. Moody in room — ambient chill indicator */}
+      {state.mrMoodyInRoom && state.screen === "game" && (
+        <div
+          data-ocid="game.moody_in_room_indicator"
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded font-display font-bold uppercase text-xs tracking-widest animate-pulse pointer-events-none"
+          style={{
+            background: "rgba(136, 170, 255, 0.15)",
+            border: "1px solid #88aaff",
+            color: "#88aaff",
+            textShadow: "0 0 10px #88aaff",
+            boxShadow: "0 0 20px rgba(136,170,255,0.2)",
+          }}
+        >
+          😌 Mr. Moody is just chilling in your room...
+        </div>
+      )}
+
+      {/* Mr. Moody Achievement popup */}
+      {showMoodyAchievement && (
+        <div
+          data-ocid="game.moody_achievement"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[90] pointer-events-none"
+          style={{ minWidth: "320px" }}
+        >
+          <div
+            className="flex items-center gap-4 px-6 py-4 rounded"
+            style={{
+              background: "rgba(8, 14, 30, 0.97)",
+              border: "2px solid #88aaff",
+              boxShadow:
+                "0 0 30px rgba(136,170,255,0.5), 0 0 80px rgba(136,170,255,0.15)",
+            }}
+          >
+            <div
+              className="text-4xl flex-shrink-0"
+              style={{ filter: "drop-shadow(0 0 10px #88aaff)" }}
+            >
+              🏆
+            </div>
+            <div>
+              <div
+                className="font-display font-black uppercase tracking-widest text-xs mb-1"
+                style={{ color: "rgba(136,170,255,0.6)" }}
+              >
+                Achievement Unlocked
+              </div>
+              <div
+                className="font-display font-black uppercase tracking-wide text-base"
+                style={{
+                  color: "#88aaff",
+                  textShadow: "0 0 12px #88aaff",
+                }}
+              >
+                MR. MOODY
+              </div>
+              <div
+                className="font-body text-xs mt-0.5"
+                style={{ color: "rgba(136,170,255,0.7)" }}
+              >
+                Mr. Moody came in and sat down. He just wanted to hang.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ ADMIN PANEL ============ */}
+      {adminPanelOpen && (
+        <div
+          data-ocid="admin.modal"
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.85)" }}
+        >
+          <div
+            className="relative w-full max-w-lg mx-4 rounded border-2 p-6 space-y-4"
+            style={{
+              background: "#030d05",
+              borderColor: "#00ff44",
+              boxShadow:
+                "0 0 40px rgba(0,255,68,0.3), inset 0 0 20px rgba(0,255,68,0.05)",
+              fontFamily: "monospace",
+            }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div
+                style={{
+                  color: "#00ff44",
+                  textShadow: "0 0 10px #00ff44",
+                  letterSpacing: "0.2em",
+                }}
+                className="text-lg font-bold uppercase"
+              >
+                &gt; ADMIN PANEL [CHEAT MODE]
+              </div>
+              <button
+                type="button"
+                data-ocid="admin.close_button"
+                onClick={() => setAdminPanelOpen(false)}
+                style={{
+                  color: "#00ff44",
+                  fontSize: "1.5rem",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Status */}
+            <div
+              className="text-xs space-y-1"
+              style={{ color: "#44ff88", opacity: 0.7 }}
+            >
+              <div>
+                MODE: {state.mode.toUpperCase()} | NIGHT: {state.night} | POWER:{" "}
+                {Math.ceil(state.power)}%
+              </div>
+              <div>
+                GOD MODE: {state.godMode ? "ON ✓" : "OFF"} | FROZEN:{" "}
+                {state.animatronisFrozen ? "ON ✓" : "OFF"}
+              </div>
+            </div>
+
+            {/* Buttons grid */}
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                {
+                  label: "AUTO WIN NIGHT",
+                  ocid: "admin.auto_win_button",
+                  action: () => {
+                    adminAutoWin();
+                    setAdminPanelOpen(false);
+                  },
+                },
+                {
+                  label: "WIN ALL 5 NIGHTS",
+                  ocid: "admin.win_all_button",
+                  action: () => {
+                    adminWinAll();
+                    setAdminPanelOpen(false);
+                  },
+                },
+                {
+                  label: "KILL ANIMATRONICS",
+                  ocid: "admin.kill_all_button",
+                  action: adminKillAll,
+                },
+                {
+                  label: "MAX POWER (100%)",
+                  ocid: "admin.max_power_button",
+                  action: adminMaxPower,
+                },
+                {
+                  label: state.animatronisFrozen
+                    ? "UNFREEZE ANIMATRONICS"
+                    : "FREEZE ANIMATRONICS",
+                  ocid: "admin.freeze_button",
+                  action: adminToggleFreeze,
+                },
+                {
+                  label: "UNLOCK ALL NIGHTS",
+                  ocid: "admin.unlock_nights_button",
+                  action: adminUnlockNights,
+                },
+                {
+                  label: state.godMode ? "GOD MODE: ON" : "GOD MODE: OFF",
+                  ocid: "admin.god_mode_button",
+                  action: adminToggleGodMode,
+                },
+              ].map((btn) => (
+                <button
+                  key={btn.ocid}
+                  type="button"
+                  data-ocid={btn.ocid}
+                  onClick={btn.action}
+                  className="px-3 py-2 text-xs font-bold uppercase tracking-widest text-left transition-all duration-100 hover:scale-[1.02] active:scale-95 cursor-pointer"
+                  style={{
+                    background: "rgba(0,255,68,0.07)",
+                    border: "1px solid rgba(0,255,68,0.4)",
+                    color: "#00ff44",
+                    textShadow: "0 0 6px rgba(0,255,68,0.4)",
+                  }}
+                >
+                  &gt; {btn.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Skip to Night */}
+            <div>
+              <div
+                className="text-xs uppercase tracking-widest mb-2"
+                style={{ color: "#44ff88", opacity: 0.7 }}
+              >
+                &gt; SKIP TO NIGHT:
+              </div>
+              <div className="flex gap-2">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    data-ocid={`admin.skip_night.button.${n}`}
+                    onClick={() => {
+                      adminSkipToNight(n);
+                      setAdminPanelOpen(false);
+                    }}
+                    className="flex-1 py-2 text-sm font-bold uppercase tracking-widest cursor-pointer transition-all duration-100 hover:scale-105 active:scale-95"
+                    style={{
+                      background: "rgba(0,255,68,0.1)",
+                      border: "1px solid rgba(0,255,68,0.5)",
+                      color: "#00ff44",
+                    }}
+                  >
+                    N{n}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="text-[10px] text-center"
+              style={{ color: "rgba(0,255,68,0.3)" }}
+            >
+              CHEAT CODE ACTIVATED — EZGG — AUTHORIZED ACCESS
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

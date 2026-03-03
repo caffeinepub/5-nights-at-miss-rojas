@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { GameMode } from "../hooks/useGameEngine";
 
 interface PowerCell {
   id: number;
@@ -10,11 +11,10 @@ interface PowerCell {
 interface PowerMinigameProps {
   onSuccess: () => void;
   onFailure: () => void;
+  mode?: GameMode;
 }
 
 const TOTAL_CELLS = 8;
-const CLICKS_NEEDED = 3;
-const TIME_LIMIT = 8; // seconds
 
 function randomPosition(): { x: number; y: number } {
   // Keep cells within safe bounds (10-90% of width, 15-80% of height)
@@ -35,7 +35,12 @@ function createCells(): PowerCell[] {
 export default function PowerMinigame({
   onSuccess,
   onFailure,
+  mode = "normal",
 }: PowerMinigameProps) {
+  const isNightmare = mode === "nightmare";
+  const CLICKS_NEEDED = isNightmare ? 8 : 3;
+  const TIME_LIMIT = isNightmare ? 2.5 : 8;
+
   const [cells, setCells] = useState<PowerCell[]>(createCells);
   const [clicks, setClicks] = useState(0);
   const [timeLeft, setTimeLeft] = useState(TIME_LIMIT);
@@ -77,7 +82,7 @@ export default function PowerMinigame({
       setFinished(true);
       setTimeout(() => onFailure(), 400);
     }
-  }, [clicks, timeLeft, finished, onSuccess, onFailure]);
+  }, [clicks, timeLeft, finished, onSuccess, onFailure, CLICKS_NEEDED]);
 
   const handleCellClick = useCallback(
     (cellId: number) => {
@@ -148,9 +153,15 @@ export default function PowerMinigame({
         </div>
         <div
           className="font-body text-sm tracking-wide text-center"
-          style={{ color: "rgba(255,150,100,0.9)" }}
+          style={{
+            color: isNightmare
+              ? "rgba(255,80,80,0.9)"
+              : "rgba(255,150,100,0.9)",
+          }}
         >
-          Click the power cells to restore power! You have 8 seconds!
+          {isNightmare
+            ? `Click ${CLICKS_NEEDED} cells to restore power! Only ${TIME_LIMIT} seconds — NIGHTMARE MODE!`
+            : `Click the power cells to restore power! You have ${TIME_LIMIT} seconds!`}
         </div>
       </div>
 

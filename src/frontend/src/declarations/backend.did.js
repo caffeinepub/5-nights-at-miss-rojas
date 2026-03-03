@@ -15,8 +15,11 @@ export const HighScore = IDL.Record({
 
 export const idlService = IDL.Service({
   'getHighScore' : IDL.Func([], [HighScore], ['query']),
+  'getNightmareScore' : IDL.Func([], [HighScore], ['query']),
   'resetHighScore' : IDL.Func([], [], []),
+  'resetNightmareScore' : IDL.Func([], [], []),
   'saveHighScore' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
+  'saveNightmareScore' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
 });
 
 export const idlInitArgs = [];
@@ -26,8 +29,11 @@ export const idlFactory = ({ IDL }) => {
   
   return IDL.Service({
     'getHighScore' : IDL.Func([], [HighScore], ['query']),
+    'getNightmareScore' : IDL.Func([], [HighScore], ['query']),
     'resetHighScore' : IDL.Func([], [], []),
+    'resetNightmareScore' : IDL.Func([], [], []),
     'saveHighScore' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
+    'saveNightmareScore' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
   });
 };
 
