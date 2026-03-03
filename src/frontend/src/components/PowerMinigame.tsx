@@ -13,8 +13,8 @@ interface PowerMinigameProps {
 }
 
 const TOTAL_CELLS = 8;
-const CLICKS_NEEDED = 5;
-const TIME_LIMIT = 5; // seconds
+const CLICKS_NEEDED = 3;
+const TIME_LIMIT = 8; // seconds
 
 function randomPosition(): { x: number; y: number } {
   // Keep cells within safe bounds (10-90% of width, 15-80% of height)
@@ -150,7 +150,7 @@ export default function PowerMinigame({
           className="font-body text-sm tracking-wide text-center"
           style={{ color: "rgba(255,150,100,0.9)" }}
         >
-          Click the power cells to restore power! You have 5 seconds!
+          Click the power cells to restore power! You have 8 seconds!
         </div>
       </div>
 
