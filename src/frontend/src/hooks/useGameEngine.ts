@@ -27,6 +27,7 @@ export interface AnimatronicState {
   active: boolean; // whether this animatronic has spawned yet
   rareSpawn: boolean; // Coach Wolferd: spawns rarely and retreats quickly
   rareTimer: number; // timer for rare animatronics to auto-retreat
+  doorKillTimer: number; // seconds elapsed standing at open door (counts up to kill threshold)
 }
 
 export interface GameState {
@@ -57,27 +58,27 @@ export interface GameState {
 
 const NIGHT_DURATION = 150; // seconds (slower)
 
-// Normal mode constants
-const NORMAL_BASE_DRAIN = 0.6;
-const NORMAL_DOOR_DRAIN = 0.4;
-const NORMAL_CAMERA_DRAIN = 0.3;
-const NORMAL_TICK_INTERVAL = 5000;
+// Normal mode constants (now the hard/original settings)
+const NORMAL_BASE_DRAIN = 3.5;
+const NORMAL_DOOR_DRAIN = 2.0;
+const NORMAL_CAMERA_DRAIN = 1.5;
+const NORMAL_TICK_INTERVAL = 900;
 const NORMAL_WOLFERD_SPAWN_CHANCE = 0.0005;
-const NORMAL_WOLFERD_MAX_TICKS = 3;
-const NORMAL_STUTZ_WALK_SPEED = 1.5;
-const NORMAL_WALK_PROGRESS_DIVISOR = 2.5;
-const NORMAL_WOLFERD_MOVE_MULTIPLIER = 2.0;
+const NORMAL_WOLFERD_MAX_TICKS = 18;
+const NORMAL_STUTZ_WALK_SPEED = 5.0;
+const NORMAL_WALK_PROGRESS_DIVISOR = 0.5;
+const NORMAL_WOLFERD_MOVE_MULTIPLIER = 99.0;
 
-// Nightmare mode constants — BRUTALLY hard
-const NIGHTMARE_BASE_DRAIN = 3.5; // Power bleeds out very fast
-const NIGHTMARE_DOOR_DRAIN = 2.0; // Doors cost a TON of power
-const NIGHTMARE_CAMERA_DRAIN = 1.5; // Cameras also expensive
-const NIGHTMARE_TICK_INTERVAL = 900; // AI ticks every 0.9s (insanely fast)
-const NIGHTMARE_WOLFERD_SPAWN_CHANCE = 0.0005; // Extremely rare even in nightmare
-const NIGHTMARE_WOLFERD_MAX_TICKS = 18; // Stays at door a long time
-const NIGHTMARE_STUTZ_WALK_SPEED = 5.0; // Stutz blazes across rooms
-const NIGHTMARE_WALK_PROGRESS_DIVISOR = 0.5; // All animatronics walk extremely fast
-const NIGHTMARE_WOLFERD_MOVE_MULTIPLIER = 99.0; // Wolferd ALWAYS moves — guaranteed every tick
+// Nightmare mode constants (now the easier/lenient settings)
+const NIGHTMARE_BASE_DRAIN = 2.2;
+const NIGHTMARE_DOOR_DRAIN = 1.0;
+const NIGHTMARE_CAMERA_DRAIN = 0.7;
+const NIGHTMARE_TICK_INTERVAL = 2500;
+const NIGHTMARE_WOLFERD_SPAWN_CHANCE = 0.0005;
+const NIGHTMARE_WOLFERD_MAX_TICKS = 3;
+const NIGHTMARE_STUTZ_WALK_SPEED = 1.5;
+const NIGHTMARE_WALK_PROGRESS_DIVISOR = 2.5;
+const NIGHTMARE_WOLFERD_MOVE_MULTIPLIER = 2.0;
 const NIGHTMARE_WOLFERD_WALK_DIVISOR = 0.3; // Wolferd walks fast but camera gives a tiny warning
 
 const ANIMATRONIC_PATHS: Record<
@@ -139,17 +140,18 @@ function createInitialAnimatronics(): AnimatronicState[] {
       active: !isRare, // rare spawns start inactive
       rareSpawn: isRare,
       rareTimer: 0,
+      doorKillTimer: 0,
     };
   });
 }
 
 function getMoveChance(night: number, mode: GameMode): number {
-  if (mode === "nightmare") {
-    // Night 1: 75%, Night 5: 99% — almost always moves every tick
+  if (mode === "normal") {
+    // Normal (hard) — Night 1: 75%, Night 5: 99% — almost always moves every tick
     return Math.min(0.99, 0.75 + (night - 1) * 0.06);
   }
-  // Normal — Night 1: 15%, Night 5: 55%
-  return 0.15 + (night - 1) * 0.1;
+  // Nightmare (easier) — Night 1: 35%, Night 5: 75%
+  return 0.35 + (night - 1) * 0.1;
 }
 
 export function useGameEngine() {
@@ -411,16 +413,31 @@ export function useGameEngine() {
         return;
       }
 
+      // Kill threshold based on mode
+      const killThreshold = isNightmare ? 2.5 : 3.0;
+
       // Update walking progress for all animatronics (skip if frozen)
       let newAnimatronics = s.animatronisFrozen
         ? s.animatronics
         : s.animatronics.map((anm) => {
+            // Update doorKillTimer for hostile animatronics standing at an open door
+            if (anm.atDoor && !anm.isWalking && anm.active && !anm.friendly) {
+              const doorClosed =
+                anm.side === "left" ? s.leftDoorClosed : s.rightDoorClosed;
+              if (!doorClosed) {
+                // Door is open — accumulate kill timer
+                return { ...anm, doorKillTimer: anm.doorKillTimer + dtSec };
+              }
+              // Door just closed — reset timer
+              return anm.doorKillTimer > 0 ? { ...anm, doorKillTimer: 0 } : anm;
+            }
+
             if (!anm.isWalking) return anm;
             // Coach Stutz walks faster; Wolferd in nightmare teleports almost instantly
             let divisor = walkProgressDivisor;
             if (anm.id === "coachStutz") {
               divisor = walkProgressDivisor / stutzWalkSpeed;
-            } else if (anm.id === "coachWolferd" && isNightmare) {
+            } else if (anm.id === "coachWolferd" && !isNightmare) {
               divisor = NIGHTMARE_WOLFERD_WALK_DIVISOR;
             }
             const newProgress = Math.min(1, anm.walkProgress + dtSec / divisor);
@@ -473,8 +490,8 @@ export function useGameEngine() {
             // Rare animatronics (Wolferd) auto-retreat
             if (updated.rareSpawn) {
               updated.rareTimer += 1;
-              // In nightmare: door doesn't make him retreat — only time does
-              const shouldRetreat = isNightmare
+              // In normal (hard) mode: door doesn't make him retreat — only time does
+              const shouldRetreat = !isNightmare
                 ? updated.rareTimer >= wolferdMaxTicks
                 : updated.rareTimer >= wolferdMaxTicks || doorClosed;
               if (shouldRetreat) {
@@ -486,18 +503,21 @@ export function useGameEngine() {
                 updated.atDoor = false;
                 updated.rareTimer = 0;
                 updated.active = false;
+                updated.doorKillTimer = 0;
                 return updated;
               }
-              // Wolferd at door with it open -- death handled on arrival in collision check
+              // Wolferd at door with it open -- death handled by doorKillTimer below
               return updated;
             }
 
             if (!doorClosed) {
               // Friendly animatronics (Mr. Moody) enter the room — handled in collision check below
-              // Door is open but we only kill/enter on arrival (handled in collision check below)
+              // Door is open — doorKillTimer accumulates in the rAF loop
               return updated;
             }
 
+            // Door is closed — reset doorKillTimer and handle retreat
+            updated.doorKillTimer = 0;
             updated.retreatTimer += 1;
             if (updated.retreatTimer >= 2 && Math.random() < 0.3) {
               updated.previousRoom = updated.currentRoom;
@@ -526,13 +546,28 @@ export function useGameEngine() {
             const currentIndex = updated.path.indexOf(updated.currentRoom);
             if (currentIndex < updated.path.length - 1) {
               const nextRoom = updated.path[currentIndex + 1];
-              updated.previousRoom = updated.currentRoom;
-              updated.currentRoom = nextRoom;
-              updated.walkProgress = 0;
-              updated.isWalking = true;
+              // Only one hostile animatronic allowed at each door at a time
+              const isDoorRoom =
+                nextRoom === "LEFT_DOOR" || nextRoom === "RIGHT_DOOR";
+              const doorBlocked =
+                isDoorRoom &&
+                newAnimatronics.some(
+                  (other) =>
+                    other.id !== updated.id &&
+                    !other.friendly &&
+                    other.active &&
+                    (other.currentRoom === nextRoom ||
+                      (other.isWalking && other.currentRoom === nextRoom)),
+                );
+              if (!doorBlocked) {
+                updated.previousRoom = updated.currentRoom;
+                updated.currentRoom = nextRoom;
+                updated.walkProgress = 0;
+                updated.isWalking = true;
 
-              if (nextRoom === "LEFT_DOOR" || nextRoom === "RIGHT_DOOR") {
-                updated.atDoor = true;
+                if (isDoorRoom) {
+                  updated.atDoor = true;
+                }
               }
             }
           }
@@ -540,13 +575,13 @@ export function useGameEngine() {
           return updated;
         });
 
-        // Check door collisions: only trigger death when an animatronic
-        // JUST arrived at the door this tick (walkProgress went from <1 to 1)
+        // Check door collisions:
+        // 1. Mr. Moody: trigger achievement when he just arrives with door open
+        // 2. Hostile animatronics: kill is now handled by doorKillTimer (timer-based, NOT instant)
         for (let i = 0; i < newAnimatronics.length; i++) {
           const anm = newAnimatronics[i];
           const prev = s.animatronics[i];
           if (!anm.active) continue;
-          // Only trigger when they just finished walking INTO a door room
           const justArrived = prev.isWalking && !anm.isWalking && anm.atDoor;
           if (!justArrived) continue;
           const doorClosed =
@@ -556,12 +591,8 @@ export function useGameEngine() {
             if (!doorClosed) {
               mrMoodyJustEntered = true;
             }
-            continue;
           }
-          if (!doorClosed && !s.godMode) {
-            gameOver = true;
-            killerAnm = anm.id;
-          }
+          // Hostile animatronics: no instant kill here — doorKillTimer handles it
         }
 
         // Handle Mr. Moody sitting in room: after ~15 ticks he leaves
@@ -579,6 +610,7 @@ export function useGameEngine() {
                 isWalking: true,
                 atDoor: false,
                 retreatTimer: 0,
+                doorKillTimer: 0,
               };
             } else {
               newAnimatronics[i] = {
@@ -586,6 +618,22 @@ export function useGameEngine() {
                 retreatTimer: anm.retreatTimer + 1,
               };
             }
+          }
+        }
+      }
+
+      // Timer-based kill check (every frame): hostile animatronic has been at open door long enough
+      if (!gameOver) {
+        for (let i = 0; i < newAnimatronics.length; i++) {
+          const anm = newAnimatronics[i];
+          if (!anm.active || anm.friendly || anm.isWalking || !anm.atDoor)
+            continue;
+          const doorClosed =
+            anm.side === "left" ? s.leftDoorClosed : s.rightDoorClosed;
+          if (!doorClosed && !s.godMode && anm.doorKillTimer >= killThreshold) {
+            gameOver = true;
+            killerAnm = anm.id;
+            break;
           }
         }
       }

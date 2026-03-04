@@ -38,8 +38,8 @@ export default function PowerMinigame({
   mode = "normal",
 }: PowerMinigameProps) {
   const isNightmare = mode === "nightmare";
-  const CLICKS_NEEDED = isNightmare ? 8 : 3;
-  const TIME_LIMIT = isNightmare ? 2.5 : 8;
+  const CLICKS_NEEDED = 2;
+  const TIME_LIMIT = 3;
 
   const [cells, setCells] = useState<PowerCell[]>(createCells);
   const [clicks, setClicks] = useState(0);
@@ -82,7 +82,7 @@ export default function PowerMinigame({
       setFinished(true);
       setTimeout(() => onFailure(), 400);
     }
-  }, [clicks, timeLeft, finished, onSuccess, onFailure, CLICKS_NEEDED]);
+  }, [clicks, timeLeft, finished, onSuccess, onFailure]);
 
   const handleCellClick = useCallback(
     (cellId: number) => {
@@ -159,9 +159,7 @@ export default function PowerMinigame({
               : "rgba(255,150,100,0.9)",
           }}
         >
-          {isNightmare
-            ? `Click ${CLICKS_NEEDED} cells to restore power! Only ${TIME_LIMIT} seconds — NIGHTMARE MODE!`
-            : `Click the power cells to restore power! You have ${TIME_LIMIT} seconds!`}
+          {`Click ${CLICKS_NEEDED} cells to restore power! You have ${TIME_LIMIT} seconds!`}
         </div>
       </div>
 

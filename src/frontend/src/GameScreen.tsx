@@ -292,22 +292,36 @@ export default function GameScreen({
         const eyeX1 = 10 + doorW * 0.25;
         const eyeX2 = 10 + doorW * 0.65;
         const isNightmareEye = state.mode === "nightmare";
-        const eyeR = isNightmareEye
+
+        // Kill timer ramp (0 → 1) — how close to killing
+        const killThreshold = isNightmareEye ? 2.5 : 3.0;
+        const killRatio = leftAtDoor
+          ? Math.min(1, leftAnm.doorKillTimer / killThreshold)
+          : 0;
+
+        // Eye radius ramps up as kill timer progresses
+        const baseEyeR = isNightmareEye
           ? leftAtDoor
             ? 10
             : 7
           : leftAtDoor
             ? 6
             : 4;
+        const eyeR = baseEyeR + killRatio * (isNightmareEye ? 6 : 4);
 
-        ctx.globalAlpha = leftAtDoor ? 1 : 0.45;
-        ctx.shadowBlur = isNightmareEye
+        // Alpha ramps from 0.45 (cam) / 0.8 (door arrived) → 1.0 (about to kill)
+        const baseAlpha = leftAtDoor ? 0.8 + killRatio * 0.2 : 0.45;
+        ctx.globalAlpha = baseAlpha;
+
+        // Shadow blur ramps up as they get closer to killing
+        const baseShadow = isNightmareEye
           ? leftAtDoor
-            ? 60
+            ? 60 + killRatio * 40
             : 30
           : leftAtDoor
-            ? 20
+            ? 20 + killRatio * 30
             : 8;
+        ctx.shadowBlur = baseShadow;
         ctx.shadowColor = ANIMATRONIC_COLORS[leftAnm.id];
         ctx.fillStyle = ANIMATRONIC_COLORS[leftAnm.id];
         ctx.beginPath();
@@ -317,15 +331,15 @@ export default function GameScreen({
         ctx.arc(eyeX2, eyeY, eyeR, 0, Math.PI * 2);
         ctx.fill();
 
-        if (isNightmareEye && leftAtDoor) {
-          // Outer glow ring only when right at the door
-          ctx.shadowBlur = 80;
-          ctx.globalAlpha = 0.35;
+        if (leftAtDoor && killRatio > 0.3) {
+          // Outer glow ring intensifies as kill timer progresses
+          ctx.shadowBlur = baseShadow * 1.4;
+          ctx.globalAlpha = 0.2 + killRatio * 0.3;
           ctx.beginPath();
-          ctx.arc(eyeX1, eyeY, eyeR + 8, 0, Math.PI * 2);
+          ctx.arc(eyeX1, eyeY, eyeR + 6 + killRatio * 6, 0, Math.PI * 2);
           ctx.fill();
           ctx.beginPath();
-          ctx.arc(eyeX2, eyeY, eyeR + 8, 0, Math.PI * 2);
+          ctx.arc(eyeX2, eyeY, eyeR + 6 + killRatio * 6, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.globalAlpha = 1;
@@ -422,22 +436,36 @@ export default function GameScreen({
         const eyeX1 = rdX + doorW * 0.25;
         const eyeX2 = rdX + doorW * 0.65;
         const isNightmareEyeR = state.mode === "nightmare";
-        const eyeR = isNightmareEyeR
+
+        // Kill timer ramp (0 → 1) — how close to killing
+        const killThresholdR = isNightmareEyeR ? 2.5 : 3.0;
+        const killRatioR = rightAtDoor
+          ? Math.min(1, rightAnm.doorKillTimer / killThresholdR)
+          : 0;
+
+        // Eye radius ramps up as kill timer progresses
+        const baseEyeRR = isNightmareEyeR
           ? rightAtDoor
             ? 10
             : 7
           : rightAtDoor
             ? 6
             : 4;
+        const eyeR = baseEyeRR + killRatioR * (isNightmareEyeR ? 6 : 4);
 
-        ctx.globalAlpha = rightAtDoor ? 1 : 0.45;
-        ctx.shadowBlur = isNightmareEyeR
+        // Alpha ramps from 0.45 (cam) / 0.8 (door arrived) → 1.0 (about to kill)
+        const baseAlphaR = rightAtDoor ? 0.8 + killRatioR * 0.2 : 0.45;
+        ctx.globalAlpha = baseAlphaR;
+
+        // Shadow blur ramps up as they get closer to killing
+        const baseShadowR = isNightmareEyeR
           ? rightAtDoor
-            ? 60
+            ? 60 + killRatioR * 40
             : 30
           : rightAtDoor
-            ? 20
+            ? 20 + killRatioR * 30
             : 8;
+        ctx.shadowBlur = baseShadowR;
         ctx.shadowColor = ANIMATRONIC_COLORS[rightAnm.id];
         ctx.fillStyle = ANIMATRONIC_COLORS[rightAnm.id];
         ctx.beginPath();
@@ -447,14 +475,15 @@ export default function GameScreen({
         ctx.arc(eyeX2, eyeY, eyeR, 0, Math.PI * 2);
         ctx.fill();
 
-        if (isNightmareEyeR && rightAtDoor) {
-          ctx.shadowBlur = 80;
-          ctx.globalAlpha = 0.35;
+        if (rightAtDoor && killRatioR > 0.3) {
+          // Outer glow ring intensifies as kill timer progresses
+          ctx.shadowBlur = baseShadowR * 1.4;
+          ctx.globalAlpha = 0.2 + killRatioR * 0.3;
           ctx.beginPath();
-          ctx.arc(eyeX1, eyeY, eyeR + 8, 0, Math.PI * 2);
+          ctx.arc(eyeX1, eyeY, eyeR + 6 + killRatioR * 6, 0, Math.PI * 2);
           ctx.fill();
           ctx.beginPath();
-          ctx.arc(eyeX2, eyeY, eyeR + 8, 0, Math.PI * 2);
+          ctx.arc(eyeX2, eyeY, eyeR + 6 + killRatioR * 6, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.globalAlpha = 1;
